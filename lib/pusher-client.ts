@@ -1,21 +1,54 @@
 import PusherClient from "pusher-js"
-import { getPusherConfig } from "@/app/actions/get-pusher-config"
 
-let pusher: PusherClient | undefined
+// Singleton pattern for Pusher client
+let pusherInstance: PusherClient | null = null
 
-export const initializePusher = async () => {
-  if (!pusher) {
-    const config = await getPusherConfig()
-    pusher = new PusherClient(config.key, {
-      cluster: config.cluster,
+export function getPusherClient() {
+  if (!pusherInstance) {
+    // Get Pusher credentials from environment variables
+    const key = process.env.NEXT_PUBLIC_PUSHER_APP_KEY
+    const cluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER
+
+    if (!key || !cluster) {
+      console.error("Pusher credentials not found in environment variables")
+      throw new Error("Pusher credentials not found")
+    }
+
+    // Initialize Pusher
+    pusherInstance = new PusherClient(key, {
+      cluster,
+      forceTLS: true,
+    })
+
+    // Add global error handler
+    pusherInstance.connection.bind("error", (err: any) => {
+      console.error("Pusher connection error:", err)
     })
   }
-  return pusher
+
+  return pusherInstance
 }
 
-export const getPusherClient = () => {
-  if (!pusher) {
-    throw new Error("Pusher not initialized. Call initializePusher() first.")
+// Helper function to subscribe to a channel with error handling
+export function subscribeToPusherChannel(channelName: string) {
+  try {
+    const pusher = getPusherClient()
+    const channel = pusher.subscribe(channelName)
+
+    // Add channel subscription error handler
+    channel.bind("pusher:subscription_error", (error: any) => {
+      console.error(`Error subscribing to ${channelName}:`, error)
+    })
+
+    return channel
+  } catch (error) {
+    console.error(`Failed to subscribe to ${channelName}:`, error)
+    throw error
   }
-  return pusher
+}
+
+// Helper to check connection state
+export function isPusherConnected() {
+  if (!pusherInstance) return false
+  return pusherInstance.connection.state === "connected"
 }

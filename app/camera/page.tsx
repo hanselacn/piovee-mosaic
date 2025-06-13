@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import Link from "next/link"
+import { getPusherClient, isPusherConnected } from "@/lib/pusher-client"
 
 export default function CameraPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -12,11 +13,45 @@ export default function CameraPage() {
   const [photoTaken, setPhotoTaken] = useState(false)
   const [countdown, setCountdown] = useState(0)
   const [isSending, setIsSending] = useState(false)
+  const [pusherConnected, setPusherConnected] = useState(false)
   const shutterSound = useRef<HTMLAudioElement | null>(null)
 
-  // Initialize shutter sound
+  // Initialize shutter sound and check Pusher connection
   useEffect(() => {
     shutterSound.current = new Audio("/camera-shutter.mp3")
+
+    try {
+      // Get Pusher client and check connection
+      const pusher = getPusherClient()
+
+      // Update connection state immediately
+      setPusherConnected(isPusherConnected())
+
+      // Listen for connection state changes
+      pusher.connection.bind("connected", () => {
+        console.log("Camera: Pusher connected")
+        setPusherConnected(true)
+      })
+
+      pusher.connection.bind("disconnected", () => {
+        console.log("Camera: Pusher disconnected")
+        setPusherConnected(false)
+      })
+
+      // Force connection if not already connected
+      if (pusher.connection.state !== "connected") {
+        console.log("Camera: Forcing Pusher connection...")
+        pusher.connect()
+      }
+    } catch (error) {
+      console.error("Camera: Error setting up Pusher:", error)
+    }
+
+    return () => {
+      const pusher = getPusherClient()
+      pusher.connection.unbind("connected")
+      pusher.connection.unbind("disconnected")
+    }
   }, [])
 
   // Start camera
@@ -125,6 +160,16 @@ export default function CameraPage() {
     setPhotoTaken(false)
   }
 
+  // Function to manually reconnect Pusher
+  const reconnectPusher = () => {
+    try {
+      const pusher = getPusherClient()
+      pusher.connect()
+    } catch (error) {
+      console.error("Error reconnecting to Pusher:", error)
+    }
+  }
+
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -138,8 +183,13 @@ export default function CameraPage() {
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-green-500"></div>
-          <span>Pusher Connected</span>
+          <div className={`w-3 h-3 rounded-full ${pusherConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+          <span>{pusherConnected ? "Connected" : "Disconnected"}</span>
+          {!pusherConnected && (
+            <button onClick={reconnectPusher} className="text-xs bg-blue-500 text-white px-2 py-1 rounded ml-2">
+              Reconnect
+            </button>
+          )}
         </div>
 
         <Link href="/">
@@ -180,7 +230,7 @@ export default function CameraPage() {
 
       <div className="flex justify-center gap-4">
         {isCameraActive && !photoTaken && (
-          <Button onClick={takePhotoWithCountdown} disabled={countdown > 0}>
+          <Button onClick={takePhotoWithCountdown} disabled={countdown > 0 || !pusherConnected}>
             Take Photo
           </Button>
         )}
@@ -209,6 +259,17 @@ export default function CameraPage() {
           <p className="mt-2">Sending photo...</p>
         </div>
       )}
+
+      {/* Debug info */}
+      <div className="mt-8 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
+        <h3 className="font-bold mb-2">Debug Information</h3>
+        <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
+        <div>Camera Active: {isCameraActive ? "Yes" : "No"}</div>
+        <div>Photo Taken: {photoTaken ? "Yes" : "No"}</div>
+        <div>Environment: {process.env.NODE_ENV}</div>
+        <div>Pusher App Key: {process.env.NEXT_PUBLIC_PUSHER_APP_KEY ? "Set" : "Not Set"}</div>
+        <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER}</div>
+      </div>
     </div>
   )
 }

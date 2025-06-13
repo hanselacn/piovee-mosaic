@@ -4,8 +4,8 @@ import { useEffect, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import Link from "next/link"
+import { getPusherClient, subscribeToPusherChannel, isPusherConnected } from "@/lib/pusher-client"
 import type PusherClient from "pusher-js"
-import { initializePusher } from "@/lib/pusher-client"
 
 interface PhotoData {
   photoData: string
@@ -20,52 +20,58 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [pusherConnected, setPusherConnected] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pusherRef = useRef<PusherClient | null>(null)
   const channelRef = useRef<any>(null)
 
-  // Connect to Pusher using server action
+  // Connect to Pusher
   useEffect(() => {
-    async function connectToPusher() {
-      try {
-        const pusher = await initializePusher()
-        pusherRef.current = pusher
+    let pusher: PusherClient | null = null
 
-        // Subscribe to the mosaic channel
-        const channel = pusher.subscribe("mosaic-channel")
-        channelRef.current = channel
+    try {
+      // Get Pusher client
+      pusher = getPusherClient()
 
-        // Handle connection status
-        pusher.connection.bind("connected", () => {
-          console.log("Connected to Pusher")
-          setPusherConnected(true)
-        })
+      // Update connection state immediately
+      setPusherConnected(isPusherConnected())
 
-        pusher.connection.bind("disconnected", () => {
-          console.log("Disconnected from Pusher")
-          setPusherConnected(false)
-        })
+      // Subscribe to the mosaic channel
+      const channel = subscribeToPusherChannel("mosaic-channel")
+      channelRef.current = channel
 
-        // Listen for new photos
-        channel.bind("new-photo", (data: PhotoData) => {
-          console.log("New photo received:", data)
-          setPhotos((prev) => [...prev, data])
-        })
-      } catch (error) {
-        console.error("Error connecting to Pusher:", error)
+      // Handle connection state changes
+      pusher.connection.bind("connected", () => {
+        console.log("Pusher connected")
+        setPusherConnected(true)
+      })
+
+      pusher.connection.bind("disconnected", () => {
+        console.log("Pusher disconnected")
+        setPusherConnected(false)
+      })
+
+      // Listen for new photos
+      channel.bind("new-photo", (data: PhotoData) => {
+        console.log("New photo received:", data)
+        setPhotos((prev) => [...prev, data])
+      })
+
+      // Debug connection state
+      console.log("Initial Pusher state:", pusher.connection.state)
+
+      // Force connection if not already connected
+      if (pusher.connection.state !== "connected") {
+        console.log("Forcing Pusher connection...")
+        pusher.connect()
       }
+    } catch (error) {
+      console.error("Error setting up Pusher:", error)
     }
-
-    connectToPusher()
 
     // Clean up
     return () => {
       if (channelRef.current) {
         channelRef.current.unbind_all()
       }
-      if (pusherRef.current) {
-        pusherRef.current.unsubscribe("mosaic-channel")
-        pusherRef.current.disconnect()
-      }
+      // Note: We don't disconnect Pusher here to maintain the singleton
     }
   }, [])
 
@@ -162,6 +168,16 @@ export default function Home() {
     img.src = mainImage
   }, [mainImage, photos, tileSize])
 
+  // Function to manually reconnect Pusher
+  const reconnectPusher = () => {
+    try {
+      const pusher = getPusherClient()
+      pusher.connect()
+    } catch (error) {
+      console.error("Error reconnecting to Pusher:", error)
+    }
+  }
+
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Mosaic Display</h1>
@@ -170,6 +186,11 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <div className={`w-3 h-3 rounded-full ${pusherConnected ? "bg-green-500" : "bg-red-500"}`}></div>
           <span>{pusherConnected ? "Connected" : "Disconnected"}</span>
+          {!pusherConnected && (
+            <button onClick={reconnectPusher} className="text-xs bg-blue-500 text-white px-2 py-1 rounded ml-2">
+              Reconnect
+            </button>
+          )}
           <span className="ml-4">Photos: {photos.length}</span>
         </div>
 
@@ -212,6 +233,17 @@ export default function Home() {
           onChange={(e) => setTileSize(Number.parseInt(e.target.value))}
           className="w-full"
         />
+      </div>
+
+      {/* Debug info */}
+      <div className="mt-8 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
+        <h3 className="font-bold mb-2">Debug Information</h3>
+        <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
+        <div>Photos Loaded: {photos.length}</div>
+        <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
+        <div>Environment: {process.env.NODE_ENV}</div>
+        <div>Pusher App Key: {process.env.NEXT_PUBLIC_PUSHER_APP_KEY ? "Set" : "Not Set"}</div>
+        <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER}</div>
       </div>
     </div>
   )
