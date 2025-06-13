@@ -4,7 +4,13 @@ import { useEffect, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import Link from "next/link"
-import { getPusherClient, subscribeToPusherChannel, isPusherConnected } from "@/lib/pusher-client"
+import {
+  getPusherClient,
+  subscribeToPusherChannel,
+  isPusherConnected,
+  getPusherConnectionState,
+  checkPusherCredentials,
+} from "@/lib/pusher-client"
 import type PusherClient from "pusher-js"
 
 interface PhotoData {
@@ -19,6 +25,8 @@ export default function Home() {
   const [tileSize, setTileSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [pusherConnected, setPusherConnected] = useState(false)
+  const [pusherState, setPusherState] = useState("uninitialized")
+  const [pusherError, setPusherError] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const channelRef = useRef<any>(null)
 
@@ -27,11 +35,21 @@ export default function Home() {
     let pusher: PusherClient | null = null
 
     try {
+      // Check credentials first
+      const credentials = checkPusherCredentials()
+      console.log("Pusher credentials check:", credentials)
+
+      if (!credentials.hasKey || !credentials.hasCluster) {
+        setPusherError(`Missing credentials: Key=${credentials.hasKey}, Cluster=${credentials.hasCluster}`)
+        return
+      }
+
       // Get Pusher client
       pusher = getPusherClient()
 
       // Update connection state immediately
       setPusherConnected(isPusherConnected())
+      setPusherState(getPusherConnectionState())
 
       // Subscribe to the mosaic channel
       const channel = subscribeToPusherChannel("mosaic-channel")
@@ -41,11 +59,23 @@ export default function Home() {
       pusher.connection.bind("connected", () => {
         console.log("Pusher connected")
         setPusherConnected(true)
+        setPusherState("connected")
+        setPusherError(null)
       })
 
       pusher.connection.bind("disconnected", () => {
         console.log("Pusher disconnected")
         setPusherConnected(false)
+        setPusherState("disconnected")
+      })
+
+      pusher.connection.bind("error", (error: any) => {
+        console.error("Pusher connection error:", error)
+        setPusherError(error.message || "Connection error")
+      })
+
+      pusher.connection.bind("state_change", (states: any) => {
+        setPusherState(states.current)
       })
 
       // Listen for new photos
@@ -64,6 +94,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error setting up Pusher:", error)
+      setPusherError(error instanceof Error ? error.message : "Setup error")
     }
 
     // Clean up
@@ -171,10 +202,12 @@ export default function Home() {
   // Function to manually reconnect Pusher
   const reconnectPusher = () => {
     try {
+      setPusherError(null)
       const pusher = getPusherClient()
       pusher.connect()
     } catch (error) {
       console.error("Error reconnecting to Pusher:", error)
+      setPusherError(error instanceof Error ? error.message : "Reconnection error")
     }
   }
 
@@ -185,7 +218,7 @@ export default function Home() {
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
           <div className={`w-3 h-3 rounded-full ${pusherConnected ? "bg-green-500" : "bg-red-500"}`}></div>
-          <span>{pusherConnected ? "Connected" : "Disconnected"}</span>
+          <span>{pusherConnected ? "Connected" : `Disconnected (${pusherState})`}</span>
           {!pusherConnected && (
             <button onClick={reconnectPusher} className="text-xs bg-blue-500 text-white px-2 py-1 rounded ml-2">
               Reconnect
@@ -203,6 +236,13 @@ export default function Home() {
           </Link>
         </div>
       </div>
+
+      {/* Error display */}
+      {pusherError && (
+        <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+          <strong>Pusher Error:</strong> {pusherError}
+        </div>
+      )}
 
       <Card className="mb-4">
         <CardContent className="p-4">
@@ -239,11 +279,18 @@ export default function Home() {
       <div className="mt-8 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
         <h3 className="font-bold mb-2">Debug Information</h3>
         <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
+        <div>Pusher State: {pusherState}</div>
         <div>Photos Loaded: {photos.length}</div>
         <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
         <div>Environment: {process.env.NODE_ENV}</div>
-        <div>Pusher App Key: {process.env.NEXT_PUBLIC_PUSHER_APP_KEY ? "Set" : "Not Set"}</div>
-        <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER}</div>
+        <div>
+          Pusher App Key:{" "}
+          {process.env.NEXT_PUBLIC_PUSHER_APP_KEY
+            ? `${process.env.NEXT_PUBLIC_PUSHER_APP_KEY.substring(0, 10)}...`
+            : "Not Set"}
+        </div>
+        <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "Not Set"}</div>
+        {pusherError && <div className="text-red-600">Error: {pusherError}</div>}
       </div>
     </div>
   )
