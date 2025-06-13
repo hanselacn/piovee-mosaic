@@ -1,54 +1,59 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createFolderIfNotExists, uploadFile, getFileContent, listFiles } from "@/lib/google-drive"
-
-const FOLDER_NAME = "Mosaic App"
-const MAIN_IMAGE_NAME = "main-image.jpg"
-
-export async function GET() {
-  try {
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
-
-    // List files to find main image
-    const files = await listFiles(folderId)
-    const mainImage = files.find((file) => file.name === MAIN_IMAGE_NAME)
-
-    if (!mainImage) {
-      return NextResponse.json({ error: "Main image not found" }, { status: 404 })
-    }
-
-    // Get the image content
-    const imageContent = await getFileContent(mainImage.id!)
-
-    return NextResponse.json({
-      imageData: `data:image/jpeg;base64,${imageContent}`,
-      id: mainImage.id,
-    })
-  } catch (error) {
-    console.error("Error getting main image:", error)
-    return NextResponse.json({ error: "Failed to get main image" }, { status: 500 })
-  }
-}
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/app/api/auth/[...nextauth]/route"
+import { uploadFile, createFolderIfNotExists, uploadFileMultipart } from "@/lib/google-drive"
 
 export async function POST(request: NextRequest) {
   try {
-    const { imageData } = await request.json()
-
-    if (!imageData) {
-      return NextResponse.json({ error: "No image data provided" }, { status: 400 })
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
+    const { image } = await request.json()
 
-    // Upload the main image
-    const file = await uploadFile(imageData, MAIN_IMAGE_NAME, folderId)
+    if (!image) {
+      return NextResponse.json({ error: "No image provided" }, { status: 400 })
+    }
 
-    return NextResponse.json({
-      success: true,
-      id: file.id,
-      message: "Main image uploaded successfully",
-    })
+    // Create or get the Mosaic App folder
+    const folderId = await createFolderIfNotExists("Mosaic App")
+
+    // Generate a unique filename
+    const fileName = `main-image-${Date.now()}.jpg`
+
+    try {
+      // Try the stream-based upload first
+      const fileId = await uploadFile(image, fileName, folderId)
+      return NextResponse.json({ success: true, fileId })
+    } catch (streamError) {
+      console.log("Stream upload failed, trying multipart upload:", streamError)
+
+      // Fallback to multipart upload
+      const fileId = await uploadFileMultipart(image, fileName, folderId)
+      return NextResponse.json({ success: true, fileId })
+    }
   } catch (error) {
     console.error("Error uploading main image:", error)
-    return NextResponse.json({ error: "Failed to upload main image" }, { status: 500 })
+    return NextResponse.json(
+      { error: `Failed to upload image: ${error instanceof Error ? error.message : "Unknown error"}` },
+      { status: 500 },
+    )
+  }
+}
+
+export async function GET() {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // This would get the current main image
+    // For now, return a placeholder response
+    return NextResponse.json({ mainImage: null })
+  } catch (error) {
+    console.error("Error getting main image:", error)
+    return NextResponse.json({ error: "Failed to get main image" }, { status: 500 })
   }
 }

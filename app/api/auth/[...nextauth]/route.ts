@@ -42,6 +42,10 @@ export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
   },
+  // Use VERCEL_URL for dynamic URL handling
+  ...(process.env.VERCEL_URL && {
+    url: `https://${process.env.VERCEL_URL}`,
+  }),
 }
 
 const handler = NextAuth(authOptions)
