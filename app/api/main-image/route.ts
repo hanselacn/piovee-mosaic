@@ -1,7 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/app/api/auth/[...nextauth]/route"
-import { uploadFile, createFolderIfNotExists, uploadFileMultipart } from "@/lib/google-drive"
+import { createFolderIfNotExists, uploadFile, getFileContent, getPublicUrl, listFiles } from "@/lib/google-drive"
+
+const FOLDER_NAME = "Mosaic App"
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,33 +12,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { image } = await request.json()
+    const { imageData } = await request.json()
 
-    if (!image) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 })
+    if (!imageData) {
+      return NextResponse.json({ error: "No image data provided" }, { status: 400 })
     }
 
     // Create or get the Mosaic App folder
-    const folderId = await createFolderIfNotExists("Mosaic App")
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
 
     // Generate a unique filename
     const fileName = `main-image-${Date.now()}.jpg`
 
-    try {
-      // Try the stream-based upload first
-      const fileId = await uploadFile(image, fileName, folderId)
-      return NextResponse.json({ success: true, fileId })
-    } catch (streamError) {
-      console.log("Stream upload failed, trying multipart upload:", streamError)
+    // Upload using the direct HTTP approach
+    const fileId = await uploadFile(imageData, fileName, folderId)
 
-      // Fallback to multipart upload
-      const fileId = await uploadFileMultipart(image, fileName, folderId)
-      return NextResponse.json({ success: true, fileId })
-    }
+    // Make the file public and get URLs
+    const urls = await getPublicUrl(fileId)
+
+    return NextResponse.json({
+      success: true,
+      fileId,
+      urls,
+      message: "Main image uploaded successfully",
+    })
   } catch (error) {
     console.error("Error uploading main image:", error)
     return NextResponse.json(
-      { error: `Failed to upload image: ${error instanceof Error ? error.message : "Unknown error"}` },
+      {
+        error: "Failed to upload main image",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }
@@ -49,11 +55,31 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // This would get the current main image
-    // For now, return a placeholder response
-    return NextResponse.json({ mainImage: null })
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
+
+    // List files to find the most recent main image
+    const files = await listFiles(folderId)
+    const mainImage = files.find((file) => file.name?.startsWith("main-image-"))
+
+    if (!mainImage || !mainImage.id) {
+      return NextResponse.json({ mainImage: null })
+    }
+
+    // Get the image content
+    const dataUrl = await getFileContent(mainImage.id)
+
+    return NextResponse.json({
+      mainImage: {
+        id: mainImage.id,
+        name: mainImage.name,
+        dataUrl,
+      },
+    })
   } catch (error) {
     console.error("Error getting main image:", error)
-    return NextResponse.json({ error: "Failed to get main image" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Failed to get main image", details: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 },
+    )
   }
 }
