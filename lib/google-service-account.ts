@@ -124,65 +124,34 @@ export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Ph
   return files
 }
 
-function createServiceAuth() {
-  try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        type: "service_account",
-        project_id: process.env.GOOGLE_PROJECT_ID,
-        private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        auth_uri: "https://accounts.google.com/o/oauth2/auth",
-        token_uri: "https://oauth2.googleapis.com/token",
-        auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-        client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${process.env.GOOGLE_CLIENT_EMAIL}`,
-      },
-      scopes: ["https://www.googleapis.com/auth/drive"],
-    })
-    return auth
-  } catch (error) {
-    console.error("Error creating service auth:", error)
-    return null
-  }
-}
-
-// Get file content using service account
-export async function getFileContentWithServiceAccount(fileId: string) {
+// Get file content using service account - FIXED VERSION
+export async function getFileContentWithServiceAccount(fileId: string): Promise<string> {
   try {
     console.log(`📥 Getting content for file: ${fileId}`)
 
-    const auth = createServiceAuth()
-    if (!auth) {
-      throw new Error("Service account not configured")
-    }
+    const drive = getDriveService()
 
-    const drive = google.drive({ version: "v3", auth })
+    // Get file content with responseType 'stream'
+    const response = await drive.files.get(
+      {
+        fileId: fileId,
+        alt: "media",
+      },
+      {
+        responseType: "arraybuffer",
+      },
+    )
 
-    // Get file content
-    const response = await drive.files.get({
-      fileId: fileId,
-      alt: "media",
-    })
+    console.log(`📥 Response received, type: ${typeof response.data}`)
 
-    // Handle different response types
-    let buffer: Buffer
-    if (Buffer.isBuffer(response.data)) {
-      buffer = response.data
-    } else if (typeof response.data === "string") {
-      buffer = Buffer.from(response.data, "binary")
-    } else {
-      // Handle stream or other types
-      buffer = Buffer.from(response.data as any, "binary")
-    }
-
+    // Convert response to buffer
+    const buffer = Buffer.from(response.data as ArrayBuffer)
     const base64 = `data:image/jpeg;base64,${buffer.toString("base64")}`
 
     console.log(`✅ Got file content, size: ${buffer.length} bytes`)
     return base64
   } catch (error) {
-    console.error("❌ Error getting file content with service account:", error)
+    console.error(`❌ Error getting file content for ${fileId}:`, error)
     throw error
   }
 }

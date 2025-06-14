@@ -28,6 +28,10 @@ export async function GET() {
     const files = await listFilesWithServiceAccount("Mosaic Camera Photos")
 
     console.log(`📁 API: Found ${files.length} files in Google Drive`)
+    console.log(
+      "📁 API: File list:",
+      files.map((f) => ({ id: f.id, name: f.name, size: f.size })),
+    )
 
     if (files.length === 0) {
       return NextResponse.json({
@@ -41,14 +45,14 @@ export async function GET() {
     // Convert files to photo format with content
     const photos = []
 
-    // Process up to 20 most recent photos
-    const filesToProcess = files.slice(0, 20)
+    // Process up to 10 most recent photos (reduced for faster loading)
+    const filesToProcess = files.slice(0, 10)
     console.log(`📷 API: Processing ${filesToProcess.length} photos...`)
 
     for (let i = 0; i < filesToProcess.length; i++) {
       const file = filesToProcess[i]
       try {
-        console.log(`📷 API: Loading photo ${i + 1}/${filesToProcess.length}: ${file.name}`)
+        console.log(`📷 API: Loading photo ${i + 1}/${filesToProcess.length}: ${file.name} (${file.id})`)
 
         // Get file content as base64
         const photoData = await getFileContentWithServiceAccount(file.id!)
@@ -62,9 +66,10 @@ export async function GET() {
         }
 
         photos.push(photo)
-        console.log(`✅ API: Successfully loaded ${file.name}`)
+        console.log(`✅ API: Successfully loaded ${file.name} (${photoData.length} chars)`)
       } catch (error) {
         console.error(`❌ API: Failed to load photo ${file.name}:`, error)
+        console.error(`❌ API: Error details:`, error instanceof Error ? error.message : String(error))
         // Continue with other photos even if one fails
       }
     }
@@ -79,6 +84,7 @@ export async function GET() {
     })
   } catch (error) {
     console.error("❌ API: Error in camera-photos endpoint:", error)
+    console.error("❌ API: Error stack:", error instanceof Error ? error.stack : String(error))
 
     return NextResponse.json(
       {
