@@ -38,8 +38,51 @@ function createServiceAuth() {
   }
 }
 
+// Find or create folder
+async function findOrCreateFolder(drive: any, folderName: string) {
+  try {
+    console.log(`📁 Looking for folder: ${folderName}`)
+
+    // First, try to find existing folder
+    const searchResponse = await drive.files.list({
+      q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: "files(id, name)",
+    })
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      const folderId = searchResponse.data.files[0].id
+      console.log(`✅ Found existing folder: ${folderId}`)
+      return folderId
+    }
+
+    // If not found, create new folder
+    console.log(`📁 Creating new folder: ${folderName}`)
+    const folderMetadata = {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+    }
+
+    const folder = await drive.files.create({
+      requestBody: folderMetadata,
+      fields: "id",
+    })
+
+    const folderId = folder.data.id
+    console.log(`✅ Created new folder: ${folderId}`)
+
+    return folderId
+  } catch (error) {
+    console.error("❌ Error finding/creating folder:", error)
+    throw error
+  }
+}
+
 // Upload file using service account
-export async function uploadFileWithServiceAccount(base64Data: string, fileName: string, folderName = "Mosaic Photos") {
+export async function uploadFileWithServiceAccount(
+  base64Data: string,
+  fileName: string,
+  folderName = "Mosaic Camera Photos",
+) {
   try {
     console.log("🔧 Attempting service account upload...")
 
@@ -50,78 +93,43 @@ export async function uploadFileWithServiceAccount(base64Data: string, fileName:
 
     const drive = google.drive({ version: "v3", auth })
 
-    // Create or find the folder
-    let folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+    // Find or create the folder (don't rely on environment variable)
+    const folderId = await findOrCreateFolder(drive, folderName)
 
     if (!folderId) {
-      console.log("📁 Creating new folder...")
-      const folderMetadata = {
-        name: folderName,
-        mimeType: "application/vnd.google-apps.folder",
-      }
-
-      const folder = await drive.files.create({
-        requestBody: folderMetadata,
-        fields: "id",
-      })
-
-      folderId = folder.data.id!
-      console.log(`📁 Created folder with ID: ${folderId}`)
+      throw new Error("Failed to create or find folder")
     }
 
     // Remove data URL prefix if present
     const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, "")
 
-    // Create multipart body for upload
-    const boundary = "-------314159265358979323846"
-    const delimiter = "\r\n--" + boundary + "\r\n"
-    const close_delim = "\r\n--" + boundary + "--"
+    // Convert base64 to buffer for upload
+    const buffer = Buffer.from(base64Content, "base64")
 
-    const metadata = {
+    console.log(`📁 Uploading ${fileName} to folder ${folderId}...`)
+
+    // Upload file using the simpler files.create method
+    const fileMetadata = {
       name: fileName,
       parents: [folderId],
     }
 
-    const multipartRequestBody =
-      delimiter +
-      "Content-Type: application/json\r\n\r\n" +
-      JSON.stringify(metadata) +
-      delimiter +
-      "Content-Type: image/jpeg\r\n" +
-      "Content-Transfer-Encoding: base64\r\n" +
-      "\r\n" +
-      base64Content +
-      close_delim
-
-    // Get access token
-    const authClient = await auth.getClient()
-    const accessToken = await authClient.getAccessToken()
-
-    if (!accessToken.token) {
-      throw new Error("Failed to get access token from service account")
+    const media = {
+      mimeType: "image/jpeg",
+      body: buffer,
     }
 
-    // Upload file
-    const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/related; boundary="${boundary}"`,
-        Authorization: `Bearer ${accessToken.token}`,
-      },
-      body: multipartRequestBody,
+    const response = await drive.files.create({
+      requestBody: fileMetadata,
+      media: media,
+      fields: "id, name, parents",
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`)
-    }
-
-    const result = await response.json()
-    console.log("✅ Service account upload successful:", result.id)
+    console.log("✅ Service account upload successful:", response.data)
 
     return {
       success: true,
-      fileId: result.id,
+      fileId: response.data.id,
       fileName: fileName,
       folderId: folderId,
     }
@@ -132,7 +140,7 @@ export async function uploadFileWithServiceAccount(base64Data: string, fileName:
 }
 
 // List files in folder using service account
-export async function listFilesWithServiceAccount(folderName = "Mosaic Photos") {
+export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Photos") {
   try {
     const auth = createServiceAuth()
     if (!auth) {
@@ -141,17 +149,21 @@ export async function listFilesWithServiceAccount(folderName = "Mosaic Photos") 
 
     const drive = google.drive({ version: "v3", auth })
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+    // Find the folder first
+    const folderId = await findOrCreateFolder(drive, folderName)
+
     if (!folderId) {
+      console.log("📁 No folder found, returning empty list")
       return []
     }
 
     const response = await drive.files.list({
-      q: `'${folderId}' in parents and trashed=false`,
+      q: `'${folderId}' in parents and trashed=false and mimeType contains 'image/'`,
       fields: "files(id, name, createdTime, webContentLink)",
       orderBy: "createdTime desc",
     })
 
+    console.log(`📁 Found ${response.data.files?.length || 0} files in folder`)
     return response.data.files || []
   } catch (error) {
     console.error("❌ Error listing files with service account:", error)
@@ -167,28 +179,67 @@ export async function getFileContentWithServiceAccount(fileId: string) {
       throw new Error("Service account not configured")
     }
 
-    const authClient = await auth.getClient()
-    const accessToken = await authClient.getAccessToken()
+    const drive = google.drive({ version: "v3", auth })
 
-    if (!accessToken.token) {
-      throw new Error("Failed to get access token")
-    }
-
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: {
-        Authorization: `Bearer ${accessToken.token}`,
-      },
+    // Get file content
+    const response = await drive.files.get({
+      fileId: fileId,
+      alt: "media",
     })
 
-    if (!response.ok) {
-      throw new Error(`Failed to get file: ${response.status} ${response.statusText}`)
-    }
-
-    const arrayBuffer = await response.arrayBuffer()
-    const base64 = Buffer.from(arrayBuffer).toString("base64")
+    // Convert response to base64
+    const buffer = Buffer.from(response.data as any, "binary")
+    const base64 = buffer.toString("base64")
     return `data:image/jpeg;base64,${base64}`
   } catch (error) {
     console.error("❌ Error getting file content with service account:", error)
+    throw error
+  }
+}
+
+// Delete all files in folder (for clearing photos when new main image is uploaded)
+export async function clearFolderWithServiceAccount(folderName = "Mosaic Camera Photos") {
+  try {
+    const auth = createServiceAuth()
+    if (!auth) {
+      throw new Error("Service account not configured")
+    }
+
+    const drive = google.drive({ version: "v3", auth })
+
+    // Find the folder
+    const folderId = await findOrCreateFolder(drive, folderName)
+    if (!folderId) {
+      console.log("📁 No folder found to clear")
+      return { deletedCount: 0 }
+    }
+
+    // List all files in folder
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false`,
+      fields: "files(id, name)",
+    })
+
+    const files = response.data.files || []
+    console.log(`🗑️ Deleting ${files.length} files from folder`)
+
+    // Delete each file
+    let deletedCount = 0
+    for (const file of files) {
+      try {
+        await drive.files.delete({
+          fileId: file.id!,
+        })
+        deletedCount++
+        console.log(`🗑️ Deleted file: ${file.name}`)
+      } catch (deleteError) {
+        console.error(`❌ Failed to delete file ${file.name}:`, deleteError)
+      }
+    }
+
+    return { deletedCount }
+  } catch (error) {
+    console.error("❌ Error clearing folder with service account:", error)
     throw error
   }
 }

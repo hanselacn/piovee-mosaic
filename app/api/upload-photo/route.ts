@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
     console.log(`📁 Uploading ${fileName} to Google Drive...`)
 
-    // Upload using service account
+    // Upload using service account (folder will be created automatically)
     const uploadResult = await uploadFileWithServiceAccount(photoData, fileName, "Mosaic Camera Photos")
 
     console.log("✅ Photo uploaded successfully:", uploadResult)
@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       message: "Photo uploaded to Google Drive",
       fileId: uploadResult.fileId,
       fileName: uploadResult.fileName,
+      folderId: uploadResult.folderId,
       photoSize: `${photoSizeKB}KB`,
     })
   } catch (error) {
@@ -83,12 +84,8 @@ export async function GET() {
       message: "Camera photo upload API",
       serviceAccountConfigured: isConfigured,
       timestamp: new Date().toISOString(),
-      requiredEnvVars: [
-        "GOOGLE_PROJECT_ID",
-        "GOOGLE_PRIVATE_KEY",
-        "GOOGLE_CLIENT_EMAIL",
-        "GOOGLE_DRIVE_FOLDER_ID (optional)",
-      ],
+      requiredEnvVars: ["GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY", "GOOGLE_CLIENT_EMAIL"],
+      note: "GOOGLE_DRIVE_FOLDER_ID is no longer required - folders are created automatically",
     })
   } catch (error) {
     return NextResponse.json(
