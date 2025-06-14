@@ -7,6 +7,7 @@ import {
   getFileContent,
   getPublicUrl,
   listFiles,
+  deleteFile,
   AuthenticationError,
 } from "@/lib/google-drive"
 
@@ -28,6 +29,39 @@ export async function POST(request: NextRequest) {
     // Create or get the Mosaic App folder
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
 
+    // Delete existing main images first
+    const existingFiles = await listFiles(folderId)
+    const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
+
+    for (const file of mainImageFiles) {
+      if (file.id) {
+        try {
+          await deleteFile(file.id)
+          console.log(`Deleted existing main image: ${file.name}`)
+        } catch (error) {
+          console.error(`Error deleting existing main image ${file.id}:`, error)
+        }
+      }
+    }
+
+    // Clear all collage photos when uploading new main image
+    try {
+      const clearResponse = await fetch(`${process.env.NEXTAUTH_URL || "http://localhost:3000"}/api/collage-photos`, {
+        method: "DELETE",
+        headers: {
+          Cookie: request.headers.get("cookie") || "",
+        },
+      })
+
+      if (clearResponse.ok) {
+        console.log("Cleared existing collage photos")
+      } else {
+        console.error("Failed to clear collage photos:", await clearResponse.text())
+      }
+    } catch (error) {
+      console.error("Error clearing collage photos:", error)
+    }
+
     // Generate a unique filename
     const fileName = `main-image-${Date.now()}.jpg`
 
@@ -41,7 +75,7 @@ export async function POST(request: NextRequest) {
       success: true,
       fileId,
       urls,
-      message: "Main image uploaded successfully",
+      message: "Main image uploaded successfully and collage photos cleared",
     })
   } catch (error) {
     console.error("Error uploading main image:", error)

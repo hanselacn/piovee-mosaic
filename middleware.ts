@@ -7,7 +7,11 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
 
   // Define public paths that don't require authentication
-  const isPublicPath = path.startsWith("/auth") || path.startsWith("/camera") || path === "/api/websocket-proxy"
+  const isPublicPath =
+    path.startsWith("/auth") ||
+    path.startsWith("/camera") ||
+    path === "/api/websocket-proxy" ||
+    path === "/api/collage-photos" // Allow public photo uploads
 
   // Get the token
   const token = await getToken({
