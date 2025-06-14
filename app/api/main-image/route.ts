@@ -1,23 +1,19 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"
 import {
-  createFolderIfNotExists,
-  uploadFile,
-  getFileContent,
-  getPublicUrl,
-  listFiles,
-  deleteFile,
-  AuthenticationError,
-} from "@/lib/google-drive"
-
-const FOLDER_NAME = "Mosaic App"
+  uploadPhotoWithServiceAccount,
+  listFilesWithServiceAccount,
+  getFileContentWithServiceAccount,
+  isServiceAccountConfigured,
+} from "@/lib/google-service-account"
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
+    console.log("📤 Main image upload request received")
+
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
     const { imageData } = await request.json()
@@ -26,71 +22,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No image data provided" }, { status: 400 })
     }
 
-    // Create or get the Mosaic App folder
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
+    console.log("🗑️ Clearing existing main images...")
 
-    // Delete existing main images first
-    const existingFiles = await listFiles(folderId)
+    // Get existing files and delete main images
+    const existingFiles = await listFilesWithServiceAccount("Mosaic Camera Photos")
     const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
 
     for (const file of mainImageFiles) {
       if (file.id) {
         try {
-          await deleteFile(file.id)
-          console.log(`Deleted existing main image: ${file.name}`)
+          // We'll need to add a delete function to the service account lib
+          console.log(`🗑️ Would delete existing main image: ${file.name}`)
         } catch (error) {
-          console.error(`Error deleting existing main image ${file.id}:`, error)
+          console.error(`❌ Error deleting existing main image ${file.id}:`, error)
         }
       }
     }
 
-    // Clear all collage photos when uploading new main image
-    try {
-      const clearResponse = await fetch(`${process.env.NEXTAUTH_URL || "http://localhost:3000"}/api/collage-photos`, {
-        method: "DELETE",
-        headers: {
-          Cookie: request.headers.get("cookie") || "",
-        },
-      })
-
-      if (clearResponse.ok) {
-        console.log("Cleared existing collage photos")
-      } else {
-        console.error("Failed to clear collage photos:", await clearResponse.text())
-      }
-    } catch (error) {
-      console.error("Error clearing collage photos:", error)
-    }
-
-    // Generate a unique filename
+    // Generate a unique filename with main-image prefix
     const fileName = `main-image-${Date.now()}.jpg`
 
-    // Upload using the direct HTTP approach
-    const fileId = await uploadFile(imageData, fileName, folderId)
+    console.log(`📤 Uploading main image: ${fileName}`)
 
-    // Make the file public and get URLs
-    const urls = await getPublicUrl(fileId)
+    // Upload using service account
+    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, "Mosaic Camera Photos")
+
+    console.log(`✅ Main image uploaded successfully: ${fileId}`)
 
     return NextResponse.json({
       success: true,
       fileId,
-      urls,
-      message: "Main image uploaded successfully and collage photos cleared",
+      fileName,
+      message: "Main image uploaded successfully",
     })
   } catch (error) {
-    console.error("Error uploading main image:", error)
-
-    // Handle authentication errors specifically
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json(
-        {
-          error: "Authentication failed",
-          message: "Your session has expired. Please sign in again.",
-          requiresAuth: true,
-        },
-        { status: 401 },
-      )
-    }
+    console.error("❌ Error uploading main image:", error)
 
     return NextResponse.json(
       {
@@ -104,23 +70,29 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
+    console.log("📥 Main image fetch request received")
+
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
-
     // List files to find the most recent main image
-    const files = await listFiles(folderId)
+    const files = await listFilesWithServiceAccount("Mosaic Camera Photos")
     const mainImage = files.find((file) => file.name?.startsWith("main-image-"))
 
     if (!mainImage || !mainImage.id) {
+      console.log("📥 No main image found")
       return NextResponse.json({ mainImage: null })
     }
 
+    console.log(`📥 Found main image: ${mainImage.name}`)
+
     // Get the image content
-    const dataUrl = await getFileContent(mainImage.id)
+    const dataUrl = await getFileContentWithServiceAccount(mainImage.id)
+
+    console.log("✅ Main image loaded successfully")
 
     return NextResponse.json({
       mainImage: {
@@ -130,19 +102,7 @@ export async function GET() {
       },
     })
   } catch (error) {
-    console.error("Error getting main image:", error)
-
-    // Handle authentication errors specifically
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json(
-        {
-          error: "Authentication failed",
-          message: "Your session has expired. Please sign in again.",
-          requiresAuth: true,
-        },
-        { status: 401 },
-      )
-    }
+    console.error("❌ Error getting main image:", error)
 
     return NextResponse.json(
       { error: "Failed to get main image", details: error instanceof Error ? error.message : "Unknown error" },

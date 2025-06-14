@@ -16,31 +16,6 @@ export default function CameraPage() {
   const [uploadStatus, setUploadStatus] = useState<string>("")
   const [facingMode, setFacingMode] = useState<"user" | "environment">("environment")
 
-  // Check authentication on page load
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("/api/auth/session")
-        if (!response.ok) {
-          setError("Please sign in to use the camera")
-          setTimeout(() => {
-            window.location.href = "/auth/signin"
-          }, 2000)
-          return
-        }
-        console.log("✅ Authentication verified")
-      } catch (error) {
-        console.error("Auth check failed:", error)
-        setError("Authentication check failed. Please sign in.")
-        setTimeout(() => {
-          window.location.href = "/auth/signin"
-        }, 2000)
-      }
-    }
-
-    checkAuth()
-  }, [])
-
   const startCamera = useCallback(async () => {
     try {
       setError("")
@@ -161,16 +136,6 @@ export default function CameraPage() {
       })
 
       if (!response.ok) {
-        const contentType = response.headers.get("content-type")
-        if (contentType && contentType.includes("text/html")) {
-          // This is likely a redirect to sign-in page
-          setError("Authentication required. Please sign in first.")
-          setTimeout(() => {
-            window.location.href = "/auth/signin"
-          }, 2000)
-          return
-        }
-
         try {
           const errorData = await response.json()
           throw new Error(errorData.error || `Upload failed: ${response.status}`)
@@ -324,7 +289,6 @@ export default function CameraPage() {
           <li>• Click "Capture Photo" to take and upload a photo</li>
           <li>• Photos are automatically uploaded to Google Drive</li>
           <li>• Return to the main page to see photos in the mosaic</li>
-          <li>• Make sure you're signed in to Google to upload photos</li>
         </ul>
       </div>
     </div>

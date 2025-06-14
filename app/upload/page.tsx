@@ -7,16 +7,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { signIn } from "next-auth/react"
 
 export default function UploadPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
-  const [authError, setAuthError] = useState(false)
+  const [error, setError] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,7 +31,7 @@ export default function UploadPage() {
     reader.onload = (event) => {
       setSelectedImage(event.target?.result as string)
       setUploadSuccess(false)
-      setAuthError(false)
+      setError("")
     }
     reader.readAsDataURL(file)
   }
@@ -57,7 +54,7 @@ export default function UploadPage() {
     reader.onload = (event) => {
       setSelectedImage(event.target?.result as string)
       setUploadSuccess(false)
-      setAuthError(false)
+      setError("")
     }
     reader.readAsDataURL(file)
   }
@@ -67,28 +64,16 @@ export default function UploadPage() {
     e.preventDefault()
   }
 
-  // Handle authentication error
-  const handleAuthError = () => {
-    setAuthError(true)
-    // Automatically redirect to sign-in after 3 seconds
-    setTimeout(() => {
-      signIn("google", { callbackUrl: window.location.href })
-    }, 3000)
-  }
-
-  // Manual sign-in redirect
-  const handleSignIn = () => {
-    signIn("google", { callbackUrl: window.location.href })
-  }
-
   // Upload image
   const uploadImage = async () => {
     if (!selectedImage) return
 
     setUploading(true)
-    setAuthError(false)
+    setError("")
 
     try {
+      console.log("📤 Uploading main image...")
+
       const response = await fetch("/api/main-image", {
         method: "POST",
         headers: {
@@ -100,28 +85,14 @@ export default function UploadPage() {
       const data = await response.json()
 
       if (!response.ok) {
-        // Check if it's an authentication error
-        if (response.status === 401 || data.requiresAuth) {
-          handleAuthError()
-          return
-        }
         throw new Error(data.error || "Failed to upload image")
       }
 
+      console.log("✅ Main image uploaded successfully:", data)
       setUploadSuccess(true)
     } catch (error) {
-      console.error("Error uploading image:", error)
-
-      // Check if the error message indicates authentication failure
-      if (
-        error instanceof Error &&
-        (error.message.includes("Authentication failed") || error.message.includes("sign in again"))
-      ) {
-        handleAuthError()
-        return
-      }
-
-      alert("Error uploading image. Please try again.")
+      console.error("❌ Error uploading image:", error)
+      setError(error instanceof Error ? error.message : "Failed to upload image")
     } finally {
       setUploading(false)
     }
@@ -137,19 +108,11 @@ export default function UploadPage() {
         </Link>
       </div>
 
-      {/* Authentication Error Alert */}
-      {authError && (
+      {/* Error Alert */}
+      {error && (
         <Alert className="mb-4 border-red-500 bg-red-50">
           <AlertDescription className="text-red-700">
-            <div className="flex items-center justify-between">
-              <div>
-                <strong>Session Expired</strong>
-                <p className="mt-1">Your session has expired. Redirecting to sign-in page in 3 seconds...</p>
-              </div>
-              <Button onClick={handleSignIn} variant="outline" size="sm" className="ml-4">
-                Sign In Now
-              </Button>
-            </div>
+            <strong>Error:</strong> {error}
           </AlertDescription>
         </Alert>
       )}
@@ -175,12 +138,29 @@ export default function UploadPage() {
       </Card>
 
       <div className="flex justify-center">
-        <Button onClick={uploadImage} disabled={!selectedImage || uploading || authError} className="w-48">
+        <Button onClick={uploadImage} disabled={!selectedImage || uploading} className="w-48">
           {uploading ? "Uploading..." : "Set as Main Image"}
         </Button>
       </div>
 
-      {uploadSuccess && <div className="mt-4 text-center text-green-600">Image uploaded successfully!</div>}
+      {uploadSuccess && (
+        <div className="mt-4 text-center text-green-600">
+          <strong>✅ Image uploaded successfully!</strong>
+          <p className="text-sm mt-1">You can now go back to the mosaic to see your image.</p>
+        </div>
+      )}
+
+      {/* Instructions */}
+      <div className="mt-8 p-4 bg-blue-50 rounded-md">
+        <h3 className="font-bold mb-2 text-blue-800">Upload Instructions:</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• Select or drag and drop an image file</li>
+          <li>• The image will be uploaded to Google Drive using the service account</li>
+          <li>• No sign-in required - uses automatic authentication</li>
+          <li>• Return to the mosaic page to see your uploaded image</li>
+          <li>• Camera photos will enhance your main image with the soft-light effect</li>
+        </ul>
+      </div>
     </div>
   )
 }
