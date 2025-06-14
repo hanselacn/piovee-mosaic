@@ -14,7 +14,7 @@ export default function CameraPage() {
   const [lastPhotoResult, setLastPhotoResult] = useState<string | null>(null)
   const [sendingStatus, setSendingStatus] = useState<string>("")
   const [lastPhotoData, setLastPhotoData] = useState<string>("")
-  const [pusherStatus, setPusherStatus] = useState<string>("Connecting...")
+  const [apiStatus, setApiStatus] = useState<string>("Checking...")
   const [showFlash, setShowFlash] = useState(false)
   const [debugLogs, setDebugLogs] = useState<string[]>([])
 
@@ -26,30 +26,35 @@ export default function CameraPage() {
     setDebugLogs((prev) => [...prev.slice(-9), logMessage]) // Keep last 10 logs
   }
 
-  // Test Pusher connection on mount
+  // Test API connection on mount
   useEffect(() => {
-    addDebugLog("🚀 Camera page loaded, testing Pusher connection...")
-    testPusherConnection()
+    addDebugLog("🚀 Camera page loaded, testing upload API...")
+    testUploadAPI()
   }, [])
 
-  // Test Pusher connection
-  const testPusherConnection = async () => {
+  // Test upload API
+  const testUploadAPI = async () => {
     try {
-      addDebugLog("🔍 Testing Pusher connection with GET /api/send-photo...")
-      const response = await fetch("/api/send-photo", { method: "GET" })
-      addDebugLog(`📡 GET /api/send-photo response status: ${response.status}`)
+      addDebugLog("🔍 Testing upload API with GET /api/upload-photo...")
+      const response = await fetch("/api/upload-photo", { method: "GET" })
+      addDebugLog(`📡 GET /api/upload-photo response status: ${response.status}`)
 
       if (response.ok) {
-        const data = await response.text()
-        addDebugLog(`✅ Pusher connection test successful: ${data}`)
-        setPusherStatus("✅ Ready to send photos")
+        const data = await response.json()
+        addDebugLog(`✅ API test successful: ${JSON.stringify(data)}`)
+
+        if (data.serviceAccountConfigured) {
+          setApiStatus("✅ Ready for direct Google Drive upload")
+        } else {
+          setApiStatus("⚠️ Service account not configured")
+        }
       } else {
-        addDebugLog(`❌ Pusher connection test failed with status: ${response.status}`)
-        setPusherStatus("❌ Connection issue")
+        addDebugLog(`❌ API test failed with status: ${response.status}`)
+        setApiStatus("❌ API connection issue")
       }
     } catch (error) {
-      addDebugLog(`❌ Pusher connection test error: ${error}`)
-      setPusherStatus("❌ Connection failed")
+      addDebugLog(`❌ API test error: ${error}`)
+      setApiStatus("❌ API connection failed")
     }
   }
 
@@ -60,8 +65,8 @@ export default function CameraPage() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
-          width: { ideal: 800 }, // Reduced from 1280
-          height: { ideal: 600 }, // Reduced from 720
+          width: { ideal: 1280 }, // Back to higher resolution since we're not using Pusher
+          height: { ideal: 720 },
         },
         audio: false,
       })
@@ -99,206 +104,123 @@ export default function CameraPage() {
     }
   }
 
-  // Take photo with flash effect
+  // Take photo
   const takePhoto = () => {
     addDebugLog("📸 Starting photo capture process...")
 
-    // Check if refs are available
-    addDebugLog(
-      `🔍 Checking refs - Video: ${videoRef.current ? "Available" : "NULL"}, Canvas: ${canvasRef.current ? "Available" : "NULL"}`,
-    )
-
-    if (!videoRef.current) {
-      addDebugLog("❌ Video ref is null")
-      alert("Video element not available. Please restart the camera.")
-      return
-    }
-
-    if (!canvasRef.current) {
-      addDebugLog("❌ Canvas ref is null")
-      alert("Canvas element not available. Please refresh the page.")
+    if (!videoRef.current || !canvasRef.current) {
+      addDebugLog("❌ Video or canvas ref not available")
       return
     }
 
     const video = videoRef.current
     const canvas = canvasRef.current
 
-    // Check if video is ready
     if (video.readyState < 2) {
       addDebugLog(`❌ Video not ready. ReadyState: ${video.readyState}`)
       alert("Video is not ready yet. Please wait a moment and try again.")
       return
     }
 
-    addDebugLog(`✅ Video ready. ReadyState: ${video.readyState}`)
-
     // Show flash effect
     setShowFlash(true)
     setTimeout(() => setShowFlash(false), 200)
 
     const context = canvas.getContext("2d")
-
     if (!context) {
       addDebugLog("❌ Canvas context not available")
-      alert("Canvas context not available. Please refresh the page.")
       return
     }
 
-    addDebugLog("✅ Canvas context available")
-
-    // Set canvas dimensions - much smaller for Pusher compatibility
-    const maxWidth = 400 // Reduced from 600
-    const maxHeight = 300 // Reduced from 400
+    // Use higher resolution since we're uploading directly to Google Drive
+    const maxWidth = 800 // Increased from 400
+    const maxHeight = 600 // Increased from 300
 
     let { videoWidth, videoHeight } = video
     addDebugLog(`📐 Original video dimensions: ${videoWidth}x${videoHeight}`)
 
     if (videoWidth === 0 || videoHeight === 0) {
-      addDebugLog("❌ Video dimensions are 0. Video may not be loaded properly.")
-      alert("Video dimensions are invalid. Please restart the camera.")
+      addDebugLog("❌ Video dimensions are 0")
       return
     }
 
-    // Scale down to smaller size for Pusher
-    const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
-    videoWidth *= ratio
-    videoHeight *= ratio
-    addDebugLog(`📐 Scaled video dimensions: ${videoWidth}x${videoHeight}`)
+    // Scale down if needed
+    if (videoWidth > maxWidth || videoHeight > maxHeight) {
+      const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
+      videoWidth *= ratio
+      videoHeight *= ratio
+      addDebugLog(`📐 Scaled video dimensions: ${videoWidth}x${videoHeight}`)
+    }
 
     canvas.width = videoWidth
     canvas.height = videoHeight
-    addDebugLog(`📐 Canvas dimensions set to: ${canvas.width}x${canvas.height}`)
 
     try {
-      // Draw video frame to canvas
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
       addDebugLog("🎨 Video frame drawn to canvas successfully")
-    } catch (drawError) {
-      addDebugLog(`❌ Error drawing video to canvas: ${drawError}`)
-      alert("Failed to capture photo. Please try again.")
-      return
-    }
 
-    try {
-      // Get image data with higher compression for smaller file size
-      const photoData = canvas.toDataURL("image/jpeg", 0.5) // Reduced from 0.7 to 0.5
+      // Higher quality since we're not limited by Pusher
+      const photoData = canvas.toDataURL("image/jpeg", 0.8) // Increased from 0.5
       setPhotoTaken(true)
       setLastPhotoData(photoData)
 
       const dataSizeKB = Math.round(photoData.length / 1024)
-      addDebugLog(`📊 Photo data created: ${photoData.length} chars, ${dataSizeKB}KB`)
-      addDebugLog(`📊 Photo data prefix: ${photoData.substring(0, 50)}...`)
+      addDebugLog(`📊 Photo data created: ${dataSizeKB}KB`)
 
-      // Check if photo is too large for Pusher (limit to ~50KB)
-      if (dataSizeKB > 50) {
-        addDebugLog(`⚠️ Photo size (${dataSizeKB}KB) may be too large for Pusher. Attempting to compress further...`)
-
-        // Try with even higher compression
-        const compressedPhotoData = canvas.toDataURL("image/jpeg", 0.3)
-        const compressedSizeKB = Math.round(compressedPhotoData.length / 1024)
-        addDebugLog(`📊 Compressed photo: ${compressedSizeKB}KB`)
-
-        if (compressedSizeKB < dataSizeKB) {
-          setLastPhotoData(compressedPhotoData)
-          sendPhotoViaPusher(compressedPhotoData)
-        } else {
-          sendPhotoViaPusher(photoData)
-        }
-      } else {
-        sendPhotoViaPusher(photoData)
-      }
-
-      console.log("📸 Photo captured:", {
-        width: canvas.width,
-        height: canvas.height,
-        dataLength: photoData.length,
-        dataSizeKB: dataSizeKB,
-      })
-    } catch (dataError) {
-      addDebugLog(`❌ Error creating photo data: ${dataError}`)
-      alert("Failed to process photo data. Please try again.")
-      return
+      // Upload directly to Google Drive
+      uploadToGoogleDrive(photoData)
+    } catch (error) {
+      addDebugLog(`❌ Error in photo capture: ${error}`)
     }
   }
 
-  // Send photo via Pusher
-  const sendPhotoViaPusher = async (photoData: string) => {
-    addDebugLog("🚀 Starting photo send process...")
+  // Upload to Google Drive
+  const uploadToGoogleDrive = async (photoData: string) => {
+    addDebugLog("🚀 Starting Google Drive upload...")
     setIsSending(true)
-    setSendingStatus("Preparing photo...")
+    setSendingStatus("Uploading to Google Drive...")
     setLastPhotoResult(null)
 
     const dataSizeKB = Math.round(photoData.length / 1024)
-    addDebugLog(`📦 Sending photo of size: ${dataSizeKB}KB`)
+    addDebugLog(`📦 Uploading photo of size: ${dataSizeKB}KB`)
 
     try {
-      addDebugLog("📡 Preparing POST request to /api/send-photo...")
-      setSendingStatus("Sending to mosaic...")
-
-      const requestBody = JSON.stringify({ photoData })
-      addDebugLog(`📦 Request body size: ${Math.round(requestBody.length / 1024)}KB`)
-
-      addDebugLog("📡 Making POST request to /api/send-photo...")
-      const response = await fetch("/api/send-photo", {
+      const response = await fetch("/api/upload-photo", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: requestBody,
+        body: JSON.stringify({ photoData }),
       })
 
-      addDebugLog(`📡 POST /api/send-photo response status: ${response.status}`)
+      addDebugLog(`📡 Upload response status: ${response.status}`)
 
       if (!response.ok) {
-        addDebugLog("❌ Response not OK, getting error data...")
-        const errorText = await response.text()
-        addDebugLog(`❌ Error response text: ${errorText}`)
+        const errorData = await response.json()
+        addDebugLog(`❌ Upload failed: ${JSON.stringify(errorData)}`)
 
-        let errorData
-        try {
-          errorData = JSON.parse(errorText)
-          addDebugLog(`❌ Parsed error data: ${JSON.stringify(errorData)}`)
-        } catch (parseError) {
-          addDebugLog(`❌ Could not parse error response as JSON: ${parseError}`)
-          errorData = { error: errorText }
+        if (errorData.requiresAuth) {
+          throw new Error("Service account not configured. Please set up Google Service Account.")
         }
 
-        // Special handling for 413 (Payload Too Large) errors
-        if (response.status === 413 || errorData.details?.includes("413")) {
-          addDebugLog("❌ Photo too large for Pusher. Need to compress more.")
-          throw new Error(`Photo too large (${dataSizeKB}KB). Please try taking another photo.`)
-        }
-
-        throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
+        throw new Error(errorData.error || `Upload failed with status ${response.status}`)
       }
 
-      addDebugLog("✅ Response OK, parsing result...")
       const result = await response.json()
-      addDebugLog(`✅ Success response: ${JSON.stringify(result)}`)
+      addDebugLog(`✅ Upload successful: ${JSON.stringify(result)}`)
 
-      setSendingStatus("Photo sent to mosaic!")
-      setLastPhotoResult("✅ Success: Photo sent to mosaic display!")
-      addDebugLog("✅ Photo send process completed successfully")
+      setSendingStatus("Photo uploaded to Google Drive!")
+      setLastPhotoResult(`✅ Success: Photo uploaded (${result.photoSize})`)
 
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        setSendingStatus("")
-      }, 3000)
+      setTimeout(() => setSendingStatus(""), 3000)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
-      addDebugLog(`❌ Photo send failed: ${errorMessage}`)
-      console.error("❌ Error sending photo:", error)
+      addDebugLog(`❌ Upload failed: ${errorMessage}`)
 
       setSendingStatus(`Error: ${errorMessage}`)
       setLastPhotoResult(`❌ Failed: ${errorMessage}`)
-
-      // Show detailed error in alert for debugging
-      alert(
-        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${dataSizeKB}KB\nTip: Try taking another photo - it may compress better.`,
-      )
     } finally {
       setIsSending(false)
-      addDebugLog("🏁 Photo send process finished")
     }
   }
 
@@ -330,8 +252,10 @@ export default function CameraPage() {
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
-          <div className={`w-3 h-3 rounded-full ${pusherStatus.includes("✅") ? "bg-green-500" : "bg-red-500"}`}></div>
-          <span className="text-sm">{pusherStatus}</span>
+          <div
+            className={`w-3 h-3 rounded-full ${apiStatus.includes("✅") ? "bg-green-500" : apiStatus.includes("⚠️") ? "bg-yellow-500" : "bg-red-500"}`}
+          ></div>
+          <span className="text-sm">{apiStatus}</span>
         </div>
 
         <Link href="/">
@@ -370,7 +294,6 @@ export default function CameraPage() {
       <Card className="mb-4">
         <CardContent className="p-4">
           <div className="relative">
-            {/* Video element - always visible when camera is active */}
             <video
               ref={videoRef}
               autoPlay
@@ -378,17 +301,14 @@ export default function CameraPage() {
               className={`w-full rounded-md ${!isCameraActive || photoTaken ? "hidden" : ""}`}
             ></video>
 
-            {/* Canvas element - always present but hidden until photo is taken */}
             <canvas ref={canvasRef} className={`w-full rounded-md ${!photoTaken ? "hidden" : ""}`}></canvas>
 
-            {/* Start camera placeholder */}
             {!isCameraActive && (
               <div className="flex justify-center items-center h-64 bg-gray-100 rounded-md">
                 <Button onClick={startCamera}>Start Camera</Button>
               </div>
             )}
 
-            {/* Flash effect overlay */}
             {showFlash && <div className="absolute inset-0 bg-white rounded-md animate-pulse opacity-80"></div>}
           </div>
         </CardContent>
@@ -410,8 +330,8 @@ export default function CameraPage() {
               Close Camera
             </Button>
             {lastPhotoData && (
-              <Button onClick={() => sendPhotoViaPusher(lastPhotoData)} disabled={isSending}>
-                Resend Photo
+              <Button onClick={() => uploadToGoogleDrive(lastPhotoData)} disabled={isSending}>
+                Retry Upload
               </Button>
             )}
           </>
@@ -427,18 +347,35 @@ export default function CameraPage() {
       {isSending && (
         <div className="text-center mt-4">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="mt-2">{sendingStatus || "Sending photo..."}</p>
+          <p className="mt-2">{sendingStatus || "Uploading photo..."}</p>
         </div>
       )}
 
-      {/* Photo size warning */}
-      <div className="mt-4 p-4 bg-blue-50 rounded-md">
-        <h3 className="font-bold mb-2 text-blue-800">📏 Photo Optimization</h3>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• Photos are automatically compressed for real-time sharing</li>
-          <li>• Target size: Under 50KB for best performance</li>
-          <li>• Resolution: 400x300 pixels optimized for mosaic display</li>
-          <li>• If photo fails to send, try taking another - lighting affects compression</li>
+      {/* Service Account Setup Instructions */}
+      {apiStatus.includes("⚠️") && (
+        <div className="mt-8 p-4 bg-orange-50 rounded-md">
+          <h3 className="font-bold mb-2 text-orange-800">🔧 Service Account Setup Required</h3>
+          <p className="text-sm text-orange-700 mb-2">
+            To enable direct Google Drive uploads without sign-in, set up these environment variables:
+          </p>
+          <ul className="text-xs text-orange-600 space-y-1 font-mono">
+            <li>• GOOGLE_PROJECT_ID</li>
+            <li>• GOOGLE_PRIVATE_KEY</li>
+            <li>• GOOGLE_CLIENT_EMAIL</li>
+            <li>• GOOGLE_DRIVE_FOLDER_ID (optional)</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Benefits */}
+      <div className="mt-4 p-4 bg-green-50 rounded-md">
+        <h3 className="font-bold mb-2 text-green-800">🚀 Direct Google Drive Upload</h3>
+        <ul className="text-sm text-green-700 space-y-1">
+          <li>• ✅ No sign-in required for camera users</li>
+          <li>• 📸 Higher quality photos (800x600, 80% quality)</li>
+          <li>• 💾 Direct upload to Google Drive</li>
+          <li>• 🔄 Photos appear on main mosaic automatically</li>
+          <li>• 📱 No file size limitations like Pusher</li>
         </ul>
       </div>
 
@@ -461,25 +398,6 @@ export default function CameraPage() {
             ))
           )}
         </div>
-      </div>
-
-      {/* Debug info */}
-      <div className="mt-4 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
-        <h3 className="font-bold mb-2">Status Information</h3>
-        <div>Camera Active: {isCameraActive ? "Yes" : "No"}</div>
-        <div>Photo Taken: {photoTaken ? "Yes" : "No"}</div>
-        <div>Is Sending: {isSending ? "Yes" : "No"}</div>
-        <div>Pusher Status: {pusherStatus}</div>
-        <div>Video Ref: {videoRef.current ? "Available" : "NULL"}</div>
-        <div>Canvas Ref: {canvasRef.current ? "Available" : "NULL"}</div>
-        {videoRef.current && <div>Video Ready State: {videoRef.current.readyState}</div>}
-        {videoRef.current && (
-          <div>
-            Video Dimensions: {videoRef.current.videoWidth}x{videoRef.current.videoHeight}
-          </div>
-        )}
-        {lastPhotoData && <div>Last Photo Size: {Math.round(lastPhotoData.length / 1024)}KB</div>}
-        {lastPhotoResult && <div>Last Result: {lastPhotoResult}</div>}
       </div>
     </div>
   )
