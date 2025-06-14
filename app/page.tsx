@@ -49,20 +49,28 @@ export default function Home() {
   // Get main image
   const fetchMainImage = async () => {
     try {
+      console.log("🖼️ Fetching main image...")
       const mainImageResponse = await fetch("/api/main-image")
+
       if (mainImageResponse.ok) {
         const mainImageData = await mainImageResponse.json()
+        console.log("✅ Main image loaded:", mainImageData.mainImage ? "Yes" : "No")
         setMainImage(mainImageData.mainImage?.dataUrl || null)
-      } else if (mainImageResponse.status === 401) {
-        const errorData = await mainImageResponse.json()
-        if (errorData.requiresAuth) {
-          handleAuthError()
-          return
+      } else {
+        console.error("❌ Main image fetch failed:", mainImageResponse.status, mainImageResponse.statusText)
+
+        if (mainImageResponse.status === 401) {
+          const errorData = await mainImageResponse.json()
+          console.error("Auth error details:", errorData)
+          if (errorData.requiresAuth) {
+            handleAuthError()
+            return
+          }
         }
       }
       setAuthError(false)
     } catch (error) {
-      console.error("Error fetching main image:", error)
+      console.error("❌ Error fetching main image:", error)
     }
   }
 
@@ -81,13 +89,27 @@ export default function Home() {
         const newPhotos = data.photos || []
 
         console.log(`📷 Found ${newPhotos.length} photos in Google Drive`)
+        console.log("Photo structure sample:", newPhotos[0])
+
+        // Ensure photos have required structure
+        const formattedPhotos = newPhotos.map((photo: any) => ({
+          id: photo.id || photo.fileName || `photo-${Date.now()}-${Math.random()}`,
+          photoData: photo.dataUrl || photo.photoData,
+          timestamp: photo.timestamp || Date.now(),
+          fileName: photo.fileName || photo.name,
+        }))
 
         // Check for new photos by comparing IDs
         const existingIds = new Set(photos.map((p) => p.id))
-        const actuallyNewPhotos = newPhotos.filter((photo: PhotoData) => !existingIds.has(photo.id))
+        const actuallyNewPhotos = formattedPhotos.filter((photo: PhotoData) => !existingIds.has(photo.id))
 
         if (actuallyNewPhotos.length > 0) {
           console.log(`✨ Found ${actuallyNewPhotos.length} new photos`)
+          console.log(
+            "New photos:",
+            actuallyNewPhotos.map((p) => ({ id: p.id, fileName: p.fileName })),
+          )
+
           setPhotos((prevPhotos) => {
             // Combine existing and new photos, sort by timestamp (newest first)
             const combined = [...prevPhotos, ...actuallyNewPhotos]
@@ -107,13 +129,16 @@ export default function Home() {
 
         setLastPhotoCheck(new Date())
       } else {
-        console.error("Failed to fetch camera photos:", response.status)
+        console.error("❌ Failed to fetch camera photos:", response.status, response.statusText)
+        const errorText = await response.text()
+        console.error("Error details:", errorText)
+
         if (showStatus) {
           setPhotoCheckStatus("❌ Failed to check photos")
         }
       }
     } catch (error) {
-      console.error("Error fetching camera photos:", error)
+      console.error("❌ Error fetching camera photos:", error)
       if (showStatus) {
         setPhotoCheckStatus("❌ Error checking photos")
       }
@@ -160,16 +185,26 @@ export default function Home() {
 
   // Draw mosaic when main image or photos change
   useEffect(() => {
-    if (!mainImage || !canvasRef.current) return
+    if (!mainImage || !canvasRef.current) {
+      console.log("🎨 Skipping mosaic draw - missing main image or canvas")
+      return
+    }
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    if (!ctx) {
+      console.error("❌ Could not get canvas context")
+      return
+    }
+
+    console.log(`🎨 Drawing mosaic with ${photos.length} photos`)
 
     // Load main image
     const img = new Image()
     img.crossOrigin = "anonymous"
     img.onload = () => {
+      console.log("✅ Main image loaded for canvas")
+
       // Set canvas size to match image
       canvas.width = img.width
       canvas.height = img.height
@@ -182,6 +217,8 @@ export default function Home() {
       const rows = Math.floor(canvas.height / tileSize)
       const actualTileWidth = canvas.width / cols
       const actualTileHeight = canvas.height / rows
+
+      console.log(`📐 Grid: ${cols}x${rows}, tile size: ${actualTileWidth}x${actualTileHeight}`)
 
       // Draw grid
       ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
@@ -201,11 +238,17 @@ export default function Home() {
         ctx.stroke()
       }
 
-      console.log(`🎨 Drawing mosaic with ${photos.length} photos`)
-
       // Draw photos in grid cells
       photos.forEach((photo, index) => {
-        if (index >= cols * rows) return // Skip if we have more photos than grid cells
+        if (index >= cols * rows) {
+          console.log(`⚠️ Skipping photo ${index} - exceeds grid capacity`)
+          return // Skip if we have more photos than grid cells
+        }
+
+        if (!photo.photoData) {
+          console.error(`❌ Photo ${index} missing photoData:`, photo)
+          return
+        }
 
         const row = Math.floor(index / cols)
         const col = index % cols
@@ -216,11 +259,18 @@ export default function Home() {
           const x = col * actualTileWidth
           const y = row * actualTileHeight
 
+          console.log(`🖼️ Drawing photo ${index} at position (${col}, ${row})`)
           // Draw photo in grid cell
           ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
         }
+        photoImg.onerror = (error) => {
+          console.error(`❌ Failed to load photo ${index}:`, error)
+        }
         photoImg.src = photo.photoData
       })
+    }
+    img.onerror = (error) => {
+      console.error("❌ Failed to load main image:", error)
     }
     img.src = mainImage
   }, [mainImage, photos, tileSize])
