@@ -15,8 +15,54 @@ export default function CameraPage() {
   const [lastPhoto, setLastPhoto] = useState<string>("")
   const [uploadStatus, setUploadStatus] = useState<string>("")
   const [facingMode, setFacingMode] = useState<"user" | "environment">("environment")
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isAuthenticating, setIsAuthenticating] = useState(true)
+
+  // Authenticate with service account on page load
+  useEffect(() => {
+    const authenticateCamera = async () => {
+      try {
+        setIsAuthenticating(true)
+        setUploadStatus("🔐 Authenticating with Google Drive...")
+
+        console.log("🔐 Authenticating camera access...")
+
+        const response = await fetch("/api/camera-auth", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "Authentication failed")
+        }
+
+        const result = await response.json()
+        console.log("✅ Camera authentication successful:", result)
+
+        setIsAuthenticated(true)
+        setUploadStatus("✅ Ready to capture photos!")
+        setTimeout(() => setUploadStatus(""), 2000)
+      } catch (error: any) {
+        console.error("❌ Camera authentication failed:", error)
+        setError(`Authentication failed: ${error.message}`)
+        setUploadStatus("❌ Authentication failed")
+      } finally {
+        setIsAuthenticating(false)
+      }
+    }
+
+    authenticateCamera()
+  }, [])
 
   const startCamera = useCallback(async () => {
+    if (!isAuthenticated) {
+      setError("Please wait for authentication to complete")
+      return
+    }
+
     try {
       setError("")
       console.log(`📷 Starting camera with facing mode: ${facingMode}`)
@@ -74,7 +120,7 @@ export default function CameraPage() {
 
       setError(errorMessage)
     }
-  }, [facingMode])
+  }, [facingMode, isAuthenticated])
 
   const stopCamera = useCallback(() => {
     if (videoRef.current?.srcObject) {
@@ -95,7 +141,7 @@ export default function CameraPage() {
   }, [stopCamera, startCamera])
 
   const capturePhoto = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || isCapturing) return
+    if (!videoRef.current || !canvasRef.current || isCapturing || !isAuthenticated) return
 
     try {
       setIsCapturing(true)
@@ -157,7 +203,7 @@ export default function CameraPage() {
     } finally {
       setIsCapturing(false)
     }
-  }, [isCapturing])
+  }, [isCapturing, isAuthenticated])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -174,6 +220,13 @@ export default function CameraPage() {
           <Button variant="outline">← Back to Mosaic</Button>
         </Link>
       </div>
+
+      {/* Authentication Status */}
+      {isAuthenticating && (
+        <div className="mb-4 p-3 rounded bg-blue-100 border border-blue-400 text-blue-700">
+          <strong>Status:</strong> 🔐 Authenticating with Google Drive...
+        </div>
+      )}
 
       {/* Error Alert */}
       {error && (
@@ -199,98 +252,110 @@ export default function CameraPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Camera Feed */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Camera Feed</span>
-              <div className="flex gap-2">
-                {isStreaming && (
-                  <Button onClick={flipCamera} variant="outline" size="sm">
-                    🔄 Flip
-                  </Button>
-                )}
-                {!isStreaming ? (
-                  <Button onClick={startCamera} className="bg-green-600 hover:bg-green-700">
-                    📷 Start Camera
-                  </Button>
-                ) : (
-                  <Button onClick={stopCamera} variant="destructive">
-                    ⏹️ Stop Camera
-                  </Button>
+      {/* Main Content - Only show when authenticated */}
+      {isAuthenticated ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Camera Feed */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>Camera Feed</span>
+                <div className="flex gap-2">
+                  {isStreaming && (
+                    <Button onClick={flipCamera} variant="outline" size="sm">
+                      🔄 Flip
+                    </Button>
+                  )}
+                  {!isStreaming ? (
+                    <Button onClick={startCamera} className="bg-green-600 hover:bg-green-700">
+                      📷 Start Camera
+                    </Button>
+                  ) : (
+                    <Button onClick={stopCamera} variant="destructive">
+                      ⏹️ Stop Camera
+                    </Button>
+                  )}
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="relative">
+                <video
+                  ref={videoRef}
+                  className="w-full h-auto rounded-lg border"
+                  playsInline
+                  muted
+                  style={{ maxHeight: "400px", objectFit: "cover" }}
+                />
+                {!isStreaming && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
+                    <p className="text-gray-500">Camera not active</p>
+                  </div>
                 )}
               </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="relative">
-              <video
-                ref={videoRef}
-                className="w-full h-auto rounded-lg border"
-                playsInline
-                muted
-                style={{ maxHeight: "400px", objectFit: "cover" }}
-              />
-              {!isStreaming && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
-                  <p className="text-gray-500">Camera not active</p>
+
+              {isStreaming && (
+                <div className="mt-4 flex justify-center">
+                  <Button
+                    onClick={capturePhoto}
+                    disabled={isCapturing}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg"
+                  >
+                    {isCapturing ? "📸 Capturing..." : "📸 Capture Photo"}
+                  </Button>
                 </div>
               )}
-            </div>
+            </CardContent>
+          </Card>
 
-            {isStreaming && (
-              <div className="mt-4 flex justify-center">
-                <Button
-                  onClick={capturePhoto}
-                  disabled={isCapturing}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg"
-                >
-                  {isCapturing ? "📸 Capturing..." : "📸 Capture Photo"}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Last Photo */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Last Captured Photo</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {lastPhoto ? (
-              <div className="space-y-4">
-                <img
-                  src={lastPhoto || "/placeholder.svg"}
-                  alt="Last captured"
-                  className="w-full h-auto rounded-lg border"
-                />
-                <p className="text-sm text-gray-600 text-center">Photo captured and uploaded to Google Drive</p>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-64 bg-gray-100 rounded-lg">
-                <p className="text-gray-500">No photo captured yet</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          {/* Last Photo */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Last Captured Photo</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {lastPhoto ? (
+                <div className="space-y-4">
+                  <img
+                    src={lastPhoto || "/placeholder.svg"}
+                    alt="Last captured"
+                    className="w-full h-auto rounded-lg border"
+                  />
+                  <p className="text-sm text-gray-600 text-center">Photo captured and uploaded to Google Drive</p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-64 bg-gray-100 rounded-lg">
+                  <p className="text-gray-500">No photo captured yet</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        !isAuthenticating && (
+          <div className="flex items-center justify-center h-64 bg-gray-100 rounded-lg">
+            <p className="text-gray-500">Authentication required to use camera</p>
+          </div>
+        )
+      )}
 
       {/* Hidden canvas for photo capture */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Instructions */}
-      <div className="mt-8 p-4 bg-blue-50 rounded-md">
-        <h3 className="font-bold mb-2 text-blue-800">Camera Instructions:</h3>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• Click "Start Camera" to begin</li>
-          <li>• Use "Flip" to switch between front and back camera</li>
-          <li>• Click "Capture Photo" to take and upload a photo</li>
-          <li>• Photos are automatically uploaded to Google Drive</li>
-          <li>• Return to the main page to see photos in the mosaic</li>
-        </ul>
-      </div>
+      {isAuthenticated && (
+        <div className="mt-8 p-4 bg-blue-50 rounded-md">
+          <h3 className="font-bold mb-2 text-blue-800">Camera Instructions:</h3>
+          <ul className="text-sm text-blue-700 space-y-1">
+            <li>• Click "Start Camera" to begin</li>
+            <li>• Use "Flip" to switch between front and back camera</li>
+            <li>• Click "Capture Photo" to take and upload a photo</li>
+            <li>• Photos are automatically uploaded to Google Drive</li>
+            <li>• Return to the main page to see photos in the mosaic</li>
+            <li>• Works in incognito mode with service account authentication</li>
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
