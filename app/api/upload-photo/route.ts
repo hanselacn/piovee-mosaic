@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { uploadPhotoWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
+import { uploadcollagePhotoWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     console.log(`📷 Uploading camera photo: ${fileName}`)
 
     // Upload to the "Camera Photos" folder using service account
-    const fileId = await uploadPhotoWithServiceAccount(photoData, fileName, "Camera Photos")
+    const fileId = await uploadcollagePhotoWithServiceAccount(photoData, fileName, "Camera Photos")
 
     console.log(`✅ Camera photo uploaded successfully: ${fileName} (${fileId})`)
 

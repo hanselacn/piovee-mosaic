@@ -102,6 +102,48 @@ export async function uploadPhotoWithServiceAccount(
   return response.data.id!
 }
 
+// Upload a photo to Google Drive
+export async function uploadcollagePhotoWithServiceAccount(
+  base64Data: string,
+  fileName: string,
+  folderName = "Mosaic Camera Photos",
+): Promise<string> {
+  const drive = getDriveService()
+
+  console.log(`📤 Uploading photo: ${fileName}`)
+
+  // Get or create folder
+  const folderId = (await findOrCreateFolder(folderName))
+
+  // Convert base64 to buffer
+  const base64Content = base64Data.replace(/^data:image\/[a-z]+;base64,/, "")
+  const buffer = Buffer.from(base64Content, "base64")
+
+  // Create readable stream from buffer
+  const stream = new Readable({
+    read() {
+      this.push(buffer)
+      this.push(null)
+    },
+  })
+
+  // Upload file
+  const response = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      parents: [folderId],
+    },
+    media: {
+      mimeType: "image/jpeg",
+      body: stream,
+    },
+    fields: "id, name, createdTime",
+  })
+
+  console.log(`✅ Photo uploaded: ${fileName} (${response.data.id})`)
+  return response.data.id!
+}
+
 // List files in a folder
 export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Photos"): Promise<any[]> {
   const drive = getDriveService()
