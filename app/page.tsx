@@ -6,12 +6,17 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 import { signIn } from "next-auth/react"
+import {
+  getPusherClient,
+  subscribeToPusherChannel,
+  isPusherConnected,
+  getPusherConnectionState,
+} from "@/lib/pusher-client"
 
 interface PhotoData {
-  id: string
-  name: string
-  dataUrl: string
+  photoData: string
   timestamp: number
+  id: string
 }
 
 export default function Home() {
@@ -24,7 +29,11 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null)
-  const [syncStatus, setSyncStatus] = useState<string>("")
+  const [pusherConnected, setPusherConnected] = useState(false)
+  const [pusherState, setPusherState] = useState("uninitialized")
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<string>("")
+  const channelRef = useRef<any>(null)
 
   // Handle authentication error
   const handleAuthError = () => {
@@ -40,43 +49,71 @@ export default function Home() {
     signIn("google", { callbackUrl: window.location.href })
   }
 
-  // Sync temporary photos to Google Drive
-  const syncPhotos = async () => {
+  // Connect to Pusher for real-time photo updates
+  useEffect(() => {
     try {
-      setSyncStatus("Syncing photos to Google Drive...")
-      const response = await fetch("/api/sync-photos", {
-        method: "POST",
+      // Get Pusher client
+      const pusher = getPusherClient()
+
+      // Update connection state immediately
+      setPusherConnected(isPusherConnected())
+      setPusherState(getPusherConnectionState())
+
+      // Subscribe to the mosaic channel
+      const channel = subscribeToPusherChannel("mosaic-channel")
+      channelRef.current = channel
+
+      // Handle connection state changes
+      pusher.connection.bind("connected", () => {
+        console.log("Pusher connected")
+        setPusherConnected(true)
+        setPusherState("connected")
       })
 
-      if (response.ok) {
-        const result = await response.json()
-        if (result.synced > 0) {
-          setSyncStatus(`✅ Synced ${result.synced} new photos!`)
-          setTimeout(() => setSyncStatus(""), 3000)
-        } else {
-          setSyncStatus("")
-        }
-      } else if (response.status === 401) {
-        const errorData = await response.json()
-        if (errorData.requiresAuth) {
-          handleAuthError()
-          return
-        }
+      pusher.connection.bind("disconnected", () => {
+        console.log("Pusher disconnected")
+        setPusherConnected(false)
+        setPusherState("disconnected")
+      })
+
+      pusher.connection.bind("error", (error: any) => {
+        console.error("Pusher connection error:", error)
+        setPusherConnected(false)
+      })
+
+      pusher.connection.bind("state_change", (states: any) => {
+        console.log("Pusher state changed:", states.previous, "->", states.current)
+        setPusherState(states.current)
+        setPusherConnected(states.current === "connected")
+      })
+
+      // Listen for new photos
+      channel.bind("new-photo", (data: PhotoData) => {
+        console.log("New photo received:", data)
+        setPhotos((prev) => [...prev, data])
+        setLastUpdate(new Date())
+      })
+
+      // Force connection if not already connected
+      if (pusher.connection.state !== "connected") {
+        console.log("Forcing Pusher connection...")
+        pusher.connect()
       }
     } catch (error) {
-      console.error("Error syncing photos:", error)
-      setSyncStatus("❌ Failed to sync photos")
-      setTimeout(() => setSyncStatus(""), 3000)
+      console.error("Error setting up Pusher:", error)
     }
-  }
 
-  // Get main image and photos
-  const fetchData = async () => {
+    // Clean up
+    return () => {
+      if (channelRef.current) {
+        channelRef.current.unbind_all()
+      }
+    }
+  }, [])
+
+  // Get main image
+  const fetchMainImage = async () => {
     try {
-      // First sync any temporary photos to Google Drive
-      await syncPhotos()
-
-      // Get main image
       const mainImageResponse = await fetch("/api/main-image")
       if (mainImageResponse.ok) {
         const mainImageData = await mainImageResponse.json()
@@ -88,24 +125,9 @@ export default function Home() {
           return
         }
       }
-
-      // Get collage photos from Google Drive
-      const photosResponse = await fetch("/api/collage-photos")
-      if (photosResponse.ok) {
-        const photosData = await photosResponse.json()
-        setPhotos(photosData.photos || [])
-      } else if (photosResponse.status === 401) {
-        const errorData = await photosResponse.json()
-        if (errorData.requiresAuth) {
-          handleAuthError()
-          return
-        }
-      }
-
       setAuthError(false)
-      setLastUpdate(new Date())
     } catch (error) {
-      console.error("Error fetching data:", error)
+      console.error("Error fetching main image:", error)
     }
   }
 
@@ -113,18 +135,18 @@ export default function Home() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
-      await fetchData()
+      await fetchMainImage()
       setLoading(false)
     }
     loadData()
   }, [])
 
-  // Controlled auto-refresh every 5 seconds when enabled
+  // Controlled auto-refresh for main image every 30 seconds when enabled
   useEffect(() => {
     if (autoRefresh && !authError) {
       const interval = setInterval(() => {
-        fetchData()
-      }, 5000) // 5 seconds
+        fetchMainImage()
+      }, 30000) // 30 seconds for main image only
 
       setRefreshInterval(interval)
 
@@ -197,11 +219,60 @@ export default function Home() {
           // Draw photo in grid cell
           ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
         }
-        photoImg.src = photo.dataUrl
+        photoImg.src = photo.photoData
       })
     }
     img.src = mainImage
   }, [mainImage, photos, tileSize])
+
+  // Save mosaic to Google Drive
+  const saveMosaicToGoogleDrive = async () => {
+    if (!canvasRef.current) {
+      alert("No mosaic to save!")
+      return
+    }
+
+    setIsSaving(true)
+    setSaveStatus("Preparing mosaic...")
+
+    try {
+      // Get the canvas data
+      const canvas = canvasRef.current
+      const mosaicData = canvas.toDataURL("image/jpeg", 0.9)
+
+      setSaveStatus("Uploading to Google Drive...")
+
+      const response = await fetch("/api/save-mosaic", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mosaicData }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        if (response.status === 401 || errorData.requiresAuth) {
+          handleAuthError()
+          return
+        }
+        throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
+      }
+
+      const result = await response.json()
+      console.log("✅ Mosaic saved successfully:", result)
+
+      setSaveStatus("✅ Mosaic saved to Google Drive!")
+      setTimeout(() => setSaveStatus(""), 3000)
+    } catch (error) {
+      console.error("❌ Error saving mosaic:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      setSaveStatus(`❌ Failed: ${errorMessage}`)
+      setTimeout(() => setSaveStatus(""), 5000)
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   // Toggle auto-refresh
   const toggleAutoRefresh = () => {
@@ -210,7 +281,14 @@ export default function Home() {
 
   // Manual refresh
   const handleRefresh = () => {
-    fetchData()
+    fetchMainImage()
+  }
+
+  // Clear all photos
+  const clearPhotos = () => {
+    if (confirm("Clear all photos from the mosaic?")) {
+      setPhotos([])
+    }
   }
 
   return (
@@ -234,30 +312,30 @@ export default function Home() {
         </Alert>
       )}
 
-      {/* Sync Status */}
-      {syncStatus && (
+      {/* Save Status */}
+      {saveStatus && (
         <div
           className={`mb-4 p-3 rounded ${
-            syncStatus.includes("❌")
+            saveStatus.includes("❌")
               ? "bg-red-100 border border-red-400 text-red-700"
-              : syncStatus.includes("✅")
+              : saveStatus.includes("✅")
                 ? "bg-green-100 border border-green-400 text-green-700"
                 : "bg-blue-100 border border-blue-400 text-blue-700"
           }`}
         >
-          <strong>Sync Status:</strong> {syncStatus}
+          <strong>Save Status:</strong> {saveStatus}
         </div>
       )}
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-500"></div>
-            <span>Google Drive Storage</span>
+            <div className={`w-3 h-3 rounded-full ${pusherConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+            <span>Real-time: {pusherConnected ? "Connected" : "Disconnected"}</span>
           </div>
           <span>Photos: {photos.length}</span>
 
-          {/* Auto-refresh controls */}
+          {/* Controls */}
           <div className="flex items-center gap-2">
             <Button
               onClick={toggleAutoRefresh}
@@ -268,7 +346,10 @@ export default function Home() {
               {autoRefresh ? "🔄 Auto-Refresh ON" : "⏸️ Auto-Refresh OFF"}
             </Button>
             <Button onClick={handleRefresh} variant="outline" size="sm">
-              🔄 Refresh Now
+              🔄 Refresh
+            </Button>
+            <Button onClick={clearPhotos} variant="outline" size="sm">
+              🗑️ Clear Photos
             </Button>
           </div>
         </div>
@@ -280,6 +361,13 @@ export default function Home() {
           <Link href="/camera">
             <Button>Open Camera</Button>
           </Link>
+          <Button
+            onClick={saveMosaicToGoogleDrive}
+            disabled={isSaving || !mainImage}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            {isSaving ? "💾 Saving..." : "💾 Save Mosaic"}
+          </Button>
         </div>
       </div>
 
@@ -320,10 +408,9 @@ export default function Home() {
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Upload a main image first</li>
           <li>• Open camera on any device (no sign-in needed)</li>
-          <li>• Photos are stored temporarily, then synced to Google Drive</li>
-          <li>• Click "Auto-Refresh ON" to automatically sync and check for new photos every 5 seconds</li>
-          <li>• Use "Refresh Now" for manual sync and updates</li>
-          <li>• Turn off auto-refresh to save resources when not actively viewing</li>
+          <li>• Photos appear instantly on the mosaic via real-time connection</li>
+          <li>• Click "Save Mosaic" to save the completed collage to Google Drive</li>
+          <li>• Use "Clear Photos" to start over with a clean mosaic</li>
         </ul>
       </div>
 
@@ -333,10 +420,11 @@ export default function Home() {
         <div>Photos Loaded: {photos.length}</div>
         <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
         <div>Last Update: {lastUpdate.toLocaleTimeString()}</div>
-        <div>Auto-Refresh: {autoRefresh ? "ON (5s)" : "OFF"}</div>
+        <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
+        <div>Pusher State: {pusherState}</div>
+        <div>Auto-Refresh: {autoRefresh ? "ON (30s)" : "OFF"}</div>
         <div>Auth Error: {authError ? "Yes" : "No"}</div>
         <div>Loading: {loading ? "Yes" : "No"}</div>
-        {syncStatus && <div>Sync Status: {syncStatus}</div>}
       </div>
     </div>
   )

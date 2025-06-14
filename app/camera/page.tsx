@@ -15,12 +15,30 @@ export default function CameraPage() {
   const [lastPhotoResult, setLastPhotoResult] = useState<string | null>(null)
   const [sendingStatus, setSendingStatus] = useState<string>("")
   const [lastPhotoData, setLastPhotoData] = useState<string>("")
+  const [pusherStatus, setPusherStatus] = useState<string>("Connecting...")
   const shutterSound = useRef<HTMLAudioElement | null>(null)
 
-  // Initialize shutter sound
+  // Initialize shutter sound and test Pusher connection
   useEffect(() => {
     shutterSound.current = new Audio("/camera-shutter.mp3")
+
+    // Test Pusher connection
+    testPusherConnection()
   }, [])
+
+  // Test Pusher connection
+  const testPusherConnection = async () => {
+    try {
+      const response = await fetch("/api/send-photo", { method: "GET" })
+      if (response.ok) {
+        setPusherStatus("✅ Ready to send photos")
+      } else {
+        setPusherStatus("❌ Connection issue")
+      }
+    } catch (error) {
+      setPusherStatus("❌ Connection failed")
+    }
+  }
 
   // Start camera
   const startCamera = async () => {
@@ -83,8 +101,8 @@ export default function CameraPage() {
     if (!context) return
 
     // Set canvas dimensions to match video (but limit size for better performance)
-    const maxWidth = 800
-    const maxHeight = 600
+    const maxWidth = 600
+    const maxHeight = 400
 
     let { videoWidth, videoHeight } = video
 
@@ -106,8 +124,8 @@ export default function CameraPage() {
       shutterSound.current.play().catch((e) => console.error("Error playing sound:", e))
     }
 
-    // Get image data with higher compression for smaller file size
-    const photoData = canvas.toDataURL("image/jpeg", 0.6)
+    // Get image data with compression for smaller file size
+    const photoData = canvas.toDataURL("image/jpeg", 0.7)
     setPhotoTaken(true)
     setLastPhotoData(photoData)
 
@@ -118,22 +136,22 @@ export default function CameraPage() {
       dataSizeKB: Math.round(photoData.length / 1024),
     })
 
-    // Send photo to temporary storage
-    sendPhotoToTempStorage(photoData)
+    // Send photo via Pusher
+    sendPhotoViaPusher(photoData)
   }
 
-  // Send photo to temporary storage
-  const sendPhotoToTempStorage = async (photoData: string) => {
+  // Send photo via Pusher
+  const sendPhotoViaPusher = async (photoData: string) => {
     setIsSending(true)
     setSendingStatus("Preparing photo...")
     setLastPhotoResult(null)
 
     try {
-      console.log("📡 Sending photo to temporary storage...")
+      console.log("📡 Sending photo via Pusher...")
       console.log("📡 Photo data size:", Math.round(photoData.length / 1024), "KB")
-      setSendingStatus("Storing photo temporarily...")
+      setSendingStatus("Sending to mosaic...")
 
-      const response = await fetch("/api/temp-photos", {
+      const response = await fetch("/api/send-photo", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -150,24 +168,24 @@ export default function CameraPage() {
       }
 
       const result = await response.json()
-      console.log("✅ Photo stored temporarily:", result)
+      console.log("✅ Photo sent successfully:", result)
 
-      setSendingStatus("Photo stored successfully!")
-      setLastPhotoResult("✅ Success: Photo will appear on mosaic soon!")
+      setSendingStatus("Photo sent to mosaic!")
+      setLastPhotoResult("✅ Success: Photo sent to mosaic display!")
 
       // Clear success message after 3 seconds
       setTimeout(() => {
         setSendingStatus("")
       }, 3000)
     } catch (error) {
-      console.error("❌ Error storing photo:", error)
+      console.error("❌ Error sending photo:", error)
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
       setSendingStatus(`Error: ${errorMessage}`)
       setLastPhotoResult(`❌ Failed: ${errorMessage}`)
 
       // Show detailed error in alert for debugging
       alert(
-        `Failed to store photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
+        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
       )
     } finally {
       setIsSending(false)
@@ -195,8 +213,8 @@ export default function CameraPage() {
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-green-500"></div>
-          <span>No Sign-In Required</span>
+          <div className={`w-3 h-3 rounded-full ${pusherStatus.includes("✅") ? "bg-green-500" : "bg-red-500"}`}></div>
+          <span className="text-sm">{pusherStatus}</span>
         </div>
 
         <Link href="/">
@@ -279,8 +297,8 @@ export default function CameraPage() {
               Close Camera
             </Button>
             {lastPhotoData && (
-              <Button onClick={() => sendPhotoToTempStorage(lastPhotoData)} disabled={isSending}>
-                Retry Upload
+              <Button onClick={() => sendPhotoViaPusher(lastPhotoData)} disabled={isSending}>
+                Resend Photo
               </Button>
             )}
           </>
@@ -296,18 +314,19 @@ export default function CameraPage() {
       {isSending && (
         <div className="text-center mt-4">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="mt-2">{sendingStatus || "Storing photo..."}</p>
+          <p className="mt-2">{sendingStatus || "Sending photo..."}</p>
         </div>
       )}
 
       {/* Instructions */}
       <div className="mt-8 p-4 bg-green-50 rounded-md">
-        <h3 className="font-bold mb-2 text-green-800">📱 How it works</h3>
+        <h3 className="font-bold mb-2 text-green-800">📱 Real-time Photo Sharing</h3>
         <ul className="text-sm text-green-700 space-y-1">
           <li>• ✅ No sign-in required on this device</li>
-          <li>• 📸 Photos are stored temporarily when taken</li>
-          <li>• 🔄 Main page syncs photos to Google Drive automatically</li>
+          <li>• 📸 Photos appear instantly on the main mosaic</li>
+          <li>• 🔄 Uses real-time connection via Pusher</li>
           <li>• 📱 Share this camera link with anyone to contribute photos</li>
+          <li>• 💾 Main page can save the completed mosaic to Google Drive</li>
         </ul>
       </div>
 
@@ -317,6 +336,7 @@ export default function CameraPage() {
         <div>Camera Active: {isCameraActive ? "Yes" : "No"}</div>
         <div>Photo Taken: {photoTaken ? "Yes" : "No"}</div>
         <div>Is Sending: {isSending ? "Yes" : "No"}</div>
+        <div>Pusher Status: {pusherStatus}</div>
         {lastPhotoData && <div>Last Photo Size: {Math.round(lastPhotoData.length / 1024)}KB</div>}
         {lastPhotoResult && <div>Last Result: {lastPhotoResult}</div>}
       </div>
