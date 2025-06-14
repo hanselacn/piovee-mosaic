@@ -70,6 +70,13 @@ export default function CameraPage() {
         videoRef.current.srcObject = stream
         setIsCameraActive(true)
         addDebugLog("✅ Camera started successfully")
+
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          addDebugLog(`📹 Video metadata loaded: ${videoRef.current?.videoWidth}x${videoRef.current?.videoHeight}`)
+        }
+      } else {
+        addDebugLog("❌ Video ref is null")
       }
     } catch (error) {
       addDebugLog(`❌ Camera start error: ${error}`)
@@ -94,25 +101,50 @@ export default function CameraPage() {
 
   // Take photo with flash effect
   const takePhoto = () => {
-    addDebugLog("📸 Taking photo...")
+    addDebugLog("📸 Starting photo capture process...")
 
-    if (!videoRef.current || !canvasRef.current) {
-      addDebugLog("❌ Video or canvas ref not available")
+    // Check if refs are available
+    addDebugLog(
+      `🔍 Checking refs - Video: ${videoRef.current ? "Available" : "NULL"}, Canvas: ${canvasRef.current ? "Available" : "NULL"}`,
+    )
+
+    if (!videoRef.current) {
+      addDebugLog("❌ Video ref is null")
+      alert("Video element not available. Please restart the camera.")
       return
     }
+
+    if (!canvasRef.current) {
+      addDebugLog("❌ Canvas ref is null")
+      alert("Canvas element not available. Please refresh the page.")
+      return
+    }
+
+    const video = videoRef.current
+    const canvas = canvasRef.current
+
+    // Check if video is ready
+    if (video.readyState < 2) {
+      addDebugLog(`❌ Video not ready. ReadyState: ${video.readyState}`)
+      alert("Video is not ready yet. Please wait a moment and try again.")
+      return
+    }
+
+    addDebugLog(`✅ Video ready. ReadyState: ${video.readyState}`)
 
     // Show flash effect
     setShowFlash(true)
     setTimeout(() => setShowFlash(false), 200)
 
-    const video = videoRef.current
-    const canvas = canvasRef.current
     const context = canvas.getContext("2d")
 
     if (!context) {
       addDebugLog("❌ Canvas context not available")
+      alert("Canvas context not available. Please refresh the page.")
       return
     }
+
+    addDebugLog("✅ Canvas context available")
 
     // Set canvas dimensions to match video (but limit size for better performance)
     const maxWidth = 600
@@ -120,6 +152,12 @@ export default function CameraPage() {
 
     let { videoWidth, videoHeight } = video
     addDebugLog(`📐 Original video dimensions: ${videoWidth}x${videoHeight}`)
+
+    if (videoWidth === 0 || videoHeight === 0) {
+      addDebugLog("❌ Video dimensions are 0. Video may not be loaded properly.")
+      alert("Video dimensions are invalid. Please restart the camera.")
+      return
+    }
 
     // Scale down if too large
     if (videoWidth > maxWidth || videoHeight > maxHeight) {
@@ -131,29 +169,42 @@ export default function CameraPage() {
 
     canvas.width = videoWidth
     canvas.height = videoHeight
+    addDebugLog(`📐 Canvas dimensions set to: ${canvas.width}x${canvas.height}`)
 
-    // Draw video frame to canvas
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
-    addDebugLog("🎨 Video frame drawn to canvas")
+    try {
+      // Draw video frame to canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+      addDebugLog("🎨 Video frame drawn to canvas successfully")
+    } catch (drawError) {
+      addDebugLog(`❌ Error drawing video to canvas: ${drawError}`)
+      alert("Failed to capture photo. Please try again.")
+      return
+    }
 
-    // Get image data with compression for smaller file size
-    const photoData = canvas.toDataURL("image/jpeg", 0.7)
-    setPhotoTaken(true)
-    setLastPhotoData(photoData)
+    try {
+      // Get image data with compression for smaller file size
+      const photoData = canvas.toDataURL("image/jpeg", 0.7)
+      setPhotoTaken(true)
+      setLastPhotoData(photoData)
 
-    const dataSizeKB = Math.round(photoData.length / 1024)
-    addDebugLog(`📊 Photo data created: ${photoData.length} chars, ${dataSizeKB}KB`)
-    addDebugLog(`📊 Photo data prefix: ${photoData.substring(0, 50)}...`)
+      const dataSizeKB = Math.round(photoData.length / 1024)
+      addDebugLog(`📊 Photo data created: ${photoData.length} chars, ${dataSizeKB}KB`)
+      addDebugLog(`📊 Photo data prefix: ${photoData.substring(0, 50)}...`)
 
-    console.log("📸 Photo captured:", {
-      width: canvas.width,
-      height: canvas.height,
-      dataLength: photoData.length,
-      dataSizeKB: dataSizeKB,
-    })
+      console.log("📸 Photo captured:", {
+        width: canvas.width,
+        height: canvas.height,
+        dataLength: photoData.length,
+        dataSizeKB: dataSizeKB,
+      })
 
-    // Send photo via Pusher
-    sendPhotoViaPusher(photoData)
+      // Send photo via Pusher
+      sendPhotoViaPusher(photoData)
+    } catch (dataError) {
+      addDebugLog(`❌ Error creating photo data: ${dataError}`)
+      alert("Failed to process photo data. Please try again.")
+      return
+    }
   }
 
   // Send photo via Pusher
@@ -399,6 +450,14 @@ export default function CameraPage() {
         <div>Photo Taken: {photoTaken ? "Yes" : "No"}</div>
         <div>Is Sending: {isSending ? "Yes" : "No"}</div>
         <div>Pusher Status: {pusherStatus}</div>
+        <div>Video Ref: {videoRef.current ? "Available" : "NULL"}</div>
+        <div>Canvas Ref: {canvasRef.current ? "Available" : "NULL"}</div>
+        {videoRef.current && <div>Video Ready State: {videoRef.current.readyState}</div>}
+        {videoRef.current && (
+          <div>
+            Video Dimensions: {videoRef.current.videoWidth}x{videoRef.current.videoHeight}
+          </div>
+        )}
         {lastPhotoData && <div>Last Photo Size: {Math.round(lastPhotoData.length / 1024)}KB</div>}
         {lastPhotoResult && <div>Last Result: {lastPhotoResult}</div>}
       </div>
