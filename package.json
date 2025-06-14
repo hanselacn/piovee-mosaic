@@ -38,7 +38,6 @@
     "@radix-ui/react-toggle": "latest",
     "@radix-ui/react-toggle-group": "latest",
     "@radix-ui/react-tooltip": "latest",
-    "@vercel/blob": "latest",
     "autoprefixer": "^10.4.20",
     "buffer": "latest",
     "bufferutil": "latest",
