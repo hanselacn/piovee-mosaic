@@ -3,56 +3,73 @@ import {
   listFilesWithServiceAccount,
   getFileContentWithServiceAccount,
   isServiceAccountConfigured,
+  clearFolderWithServiceAccount,
 } from "@/lib/google-service-account"
 
 // GET - List camera photos from Google Drive
 export async function GET() {
   try {
-    console.log("📸 Fetching camera photos from Google Drive...")
+    console.log("📸 API: Starting camera photos fetch...")
 
     // Check if service account is configured
     if (!isServiceAccountConfigured()) {
+      console.error("❌ API: Service account not configured")
       return NextResponse.json(
         {
           error: "Service account not configured",
           photos: [],
-          message: "Please configure Google Service Account to fetch camera photos",
         },
         { status: 503 },
       )
     }
 
     // Get list of files from Google Drive
+    console.log("📁 API: Getting file list from Google Drive...")
     const files = await listFilesWithServiceAccount("Mosaic Camera Photos")
 
-    console.log(`📁 Found ${files.length} camera photos in Google Drive`)
+    console.log(`📁 API: Found ${files.length} files in Google Drive`)
+
+    if (files.length === 0) {
+      return NextResponse.json({
+        success: true,
+        photos: [],
+        totalFiles: 0,
+        message: "No photos found in Google Drive folder",
+      })
+    }
 
     // Convert files to photo format with content
     const photos = []
 
-    for (const file of files.slice(0, 20)) {
-      // Limit to 20 most recent photos
+    // Process up to 20 most recent photos
+    const filesToProcess = files.slice(0, 20)
+    console.log(`📷 API: Processing ${filesToProcess.length} photos...`)
+
+    for (let i = 0; i < filesToProcess.length; i++) {
+      const file = filesToProcess[i]
       try {
-        console.log(`📷 Fetching content for ${file.name}...`)
+        console.log(`📷 API: Loading photo ${i + 1}/${filesToProcess.length}: ${file.name}`)
 
         // Get file content as base64
         const photoData = await getFileContentWithServiceAccount(file.id!)
 
-        photos.push({
+        const photo = {
           id: file.id,
           photoData: photoData,
           timestamp: new Date(file.createdTime || Date.now()).getTime(),
           fileName: file.name,
-        })
+          size: file.size || 0,
+        }
 
-        console.log(`✅ Loaded photo: ${file.name}`)
+        photos.push(photo)
+        console.log(`✅ API: Successfully loaded ${file.name}`)
       } catch (error) {
-        console.error(`❌ Failed to load photo ${file.name}:`, error)
+        console.error(`❌ API: Failed to load photo ${file.name}:`, error)
         // Continue with other photos even if one fails
       }
     }
 
-    console.log(`✅ Successfully loaded ${photos.length} camera photos`)
+    console.log(`✅ API: Successfully processed ${photos.length}/${filesToProcess.length} photos`)
 
     return NextResponse.json({
       success: true,
@@ -61,7 +78,7 @@ export async function GET() {
       loadedPhotos: photos.length,
     })
   } catch (error) {
-    console.error("❌ Error fetching camera photos:", error)
+    console.error("❌ API: Error in camera-photos endpoint:", error)
 
     return NextResponse.json(
       {
@@ -77,16 +94,15 @@ export async function GET() {
 // DELETE - Clear all camera photos
 export async function DELETE() {
   try {
-    console.log("🗑️ Clearing all camera photos...")
+    console.log("🗑️ API: Clearing all camera photos...")
 
     if (!isServiceAccountConfigured()) {
       return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    const { clearFolderWithServiceAccount } = await import("@/lib/google-service-account")
     const result = await clearFolderWithServiceAccount("Mosaic Camera Photos")
 
-    console.log(`✅ Cleared ${result.deletedCount} camera photos`)
+    console.log(`✅ API: Cleared ${result.deletedCount} camera photos`)
 
     return NextResponse.json({
       success: true,
@@ -94,7 +110,7 @@ export async function DELETE() {
       deletedCount: result.deletedCount,
     })
   } catch (error) {
-    console.error("❌ Error clearing camera photos:", error)
+    console.error("❌ API: Error clearing camera photos:", error)
 
     return NextResponse.json(
       {
