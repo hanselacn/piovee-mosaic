@@ -16,10 +16,21 @@ interface PhotoData {
   tileIndex?: number
 }
 
+interface MainImageData {
+  dataUrl: string
+  filename: string
+  uploadedAt: number
+  requestedTiles: number
+  actualTiles: number
+  tileSize: number
+  cols: number
+  rows: number
+  imageId?: string
+}
+
 export default function Home() {
-  const [mainImage, setMainImage] = useState<string | null>(null)
+  const [mainImage, setMainImage] = useState<MainImageData | null>(null)
   const [photos, setPhotos] = useState<PhotoData[]>([])
-  const [tileSize, setTileSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
@@ -31,11 +42,8 @@ export default function Home() {
 
   // Mosaic state
   const [mosaicReady, setMosaicReady] = useState(false)
-  const [totalTiles, setTotalTiles] = useState(0)
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
   const [tileOrder, setTileOrder] = useState<number[]>([])
-  const [cols, setCols] = useState(0)
-  const [rows, setRows] = useState(0)
 
   // Polling states
   const [autoPolling, setAutoPolling] = useState(true)
@@ -56,7 +64,7 @@ export default function Home() {
     signIn("google", { callbackUrl: window.location.href })
   }
 
-  // Get main image
+  // Get main image with grid settings
   const fetchMainImage = async () => {
     try {
       console.log("🖼️ Fetching main image...")
@@ -64,9 +72,33 @@ export default function Home() {
 
       if (mainImageResponse.ok) {
         const mainImageData = await mainImageResponse.json()
-        const imageDataUrl = mainImageData.mainImage?.dataUrl
-        setMainImage(imageDataUrl || null)
-        console.log("✅ Main image loaded")
+        console.log("✅ Main image response:", mainImageData)
+
+        if (mainImageData.mainImage) {
+          const imageData: MainImageData = {
+            dataUrl: mainImageData.mainImage.dataUrl,
+            filename: mainImageData.mainImage.filename || "main-image.jpg",
+            uploadedAt: mainImageData.mainImage.uploadedAt || Date.now(),
+            requestedTiles: mainImageData.mainImage.requestedTiles || 100,
+            actualTiles: mainImageData.mainImage.actualTiles || 100,
+            tileSize: mainImageData.mainImage.tileSize || 50,
+            cols: mainImageData.mainImage.cols || 10,
+            rows: mainImageData.mainImage.rows || 10,
+            imageId: mainImageData.mainImage.imageId,
+          }
+
+          console.log("📐 Main image grid settings:", {
+            cols: imageData.cols,
+            rows: imageData.rows,
+            tileSize: imageData.tileSize,
+            actualTiles: imageData.actualTiles,
+          })
+
+          setMainImage(imageData)
+        } else {
+          console.log("No main image found")
+          setMainImage(null)
+        }
       } else {
         console.error("❌ Main image fetch failed:", mainImageResponse.status)
         if (mainImageResponse.status === 401) {
@@ -199,32 +231,30 @@ export default function Home() {
     if (mainImage && mosaicRef.current) {
       createMosaicStructure()
     }
-  }, [mainImage, tileSize])
+  }, [mainImage])
 
-  // Create the layered mosaic structure
+  // Create the layered mosaic structure using fixed grid from main image
   const createMosaicStructure = () => {
-    if (!mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
+    if (!mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current || !mainImage) {
+      console.log("❌ Cannot create mosaic: missing refs or main image")
+      return
+    }
 
-    // Calculate dimensions based on a reference size
-    const containerWidth = 800 // Fixed width for consistency
-    const newCols = Math.floor(containerWidth / tileSize)
-    const newRows = Math.floor((containerWidth * 0.6) / tileSize) // 4:3 aspect ratio
-    const newTotalTiles = newCols * newRows
+    const { cols, rows, tileSize, actualTiles } = mainImage
 
-    console.log(`🎨 Creating mosaic: ${newCols}x${newRows} = ${newTotalTiles} tiles`)
-
-    setCols(newCols)
-    setRows(newRows)
-    setTotalTiles(newTotalTiles)
+    console.log(`🎨 Creating mosaic with fixed grid: ${cols}x${rows} = ${actualTiles} tiles`)
+    console.log(`📐 Tile size: ${tileSize}x${tileSize}px`)
 
     // Create random tile order
-    const newTileOrder = Array.from({ length: newTotalTiles }, (_, i) => i)
+    const newTileOrder = Array.from({ length: actualTiles }, (_, i) => i)
     newTileOrder.sort(() => Math.random() - 0.5)
     setTileOrder(newTileOrder)
 
-    // Set container dimensions
-    const mosaicWidth = newCols * tileSize
-    const mosaicHeight = newRows * tileSize
+    // Set container dimensions based on main image settings
+    const mosaicWidth = cols * tileSize
+    const mosaicHeight = rows * tileSize
+
+    console.log(`📏 Mosaic dimensions: ${mosaicWidth}x${mosaicHeight}px`)
 
     mosaicRef.current.style.width = `${mosaicWidth}px`
     mosaicRef.current.style.height = `${mosaicHeight}px`
@@ -236,8 +266,8 @@ export default function Home() {
     // Set up grid layouts
     const gridStyle = {
       display: "grid",
-      gridTemplateColumns: `repeat(${newCols}, ${tileSize}px)`,
-      gridTemplateRows: `repeat(${newRows}, ${tileSize}px)`,
+      gridTemplateColumns: `repeat(${cols}, ${tileSize}px)`,
+      gridTemplateRows: `repeat(${rows}, ${tileSize}px)`,
       position: "absolute" as const,
       inset: "0",
     }
@@ -246,7 +276,7 @@ export default function Home() {
     Object.assign(whiteLayerRef.current.style, gridStyle)
 
     // Create photo tiles (with soft-light blend mode)
-    for (let i = 0; i < newTotalTiles; i++) {
+    for (let i = 0; i < actualTiles; i++) {
       const photoTile = document.createElement("div")
       photoTile.className = "photo-tile"
       photoTile.style.cssText = `
@@ -262,7 +292,7 @@ export default function Home() {
     }
 
     // Create white overlay tiles
-    for (let i = 0; i < newTotalTiles; i++) {
+    for (let i = 0; i < actualTiles; i++) {
       const whiteTile = document.createElement("div")
       whiteTile.className = "white-tile"
       whiteTile.style.cssText = `
@@ -278,12 +308,14 @@ export default function Home() {
 
     setMosaicReady(true)
     setCurrentPhotoIndex(0)
-    console.log("✅ Mosaic structure created")
+    console.log("✅ Mosaic structure created successfully")
+    console.log(`📊 Photo tiles: ${photoLayerRef.current.children.length}`)
+    console.log(`⬜ White tiles: ${whiteLayerRef.current.children.length}`)
   }
 
   // Apply next photo to a random tile
   const applyNextPhoto = () => {
-    if (!mosaicReady || currentPhotoIndex >= tileOrder.length || photos.length === 0) {
+    if (!mosaicReady || !mainImage || currentPhotoIndex >= tileOrder.length || photos.length === 0) {
       console.log("Cannot apply photo: mosaic not ready or no tiles/photos available")
       return
     }
@@ -315,7 +347,7 @@ export default function Home() {
 
   // Save mosaic to Google Drive
   const saveMosaicToGoogleDrive = async () => {
-    if (!mosaicRef.current) {
+    if (!mosaicRef.current || !mainImage) {
       alert("No mosaic to save!")
       return
     }
@@ -329,22 +361,21 @@ export default function Home() {
       const ctx = canvas.getContext("2d")
       if (!ctx) throw new Error("Could not create canvas context")
 
+      const { cols, rows, tileSize } = mainImage
       const mosaicWidth = cols * tileSize
       const mosaicHeight = rows * tileSize
       canvas.width = mosaicWidth
       canvas.height = mosaicHeight
 
       // Draw main image as background
-      if (mainImage) {
-        const img = new Image()
-        img.crossOrigin = "anonymous"
-        await new Promise((resolve, reject) => {
-          img.onload = resolve
-          img.onerror = reject
-          img.src = mainImage
-        })
-        ctx.drawImage(img, 0, 0, mosaicWidth, mosaicHeight)
-      }
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = mainImage.dataUrl
+      })
+      ctx.drawImage(img, 0, 0, mosaicWidth, mosaicHeight)
 
       // Draw photos on top with blend mode simulation
       const photoTiles = photoLayerRef.current?.children
@@ -459,8 +490,8 @@ export default function Home() {
   }
 
   const getRevealPercentage = () => {
-    if (totalTiles === 0) return 0
-    return Math.round((currentPhotoIndex / totalTiles) * 100)
+    if (!mainImage || mainImage.actualTiles === 0) return 0
+    return Math.round((currentPhotoIndex / mainImage.actualTiles) * 100)
   }
 
   return (
@@ -510,7 +541,7 @@ export default function Home() {
 
           <span>Photos: {photos.length}</span>
           <span>
-            Applied: {currentPhotoIndex}/{totalTiles}
+            Applied: {currentPhotoIndex}/{mainImage?.actualTiles || 0}
           </span>
           <span>Revealed: {getRevealPercentage()}%</span>
 
@@ -576,7 +607,7 @@ export default function Home() {
                   ref={mosaicRef}
                   className="relative border border-gray-300 mx-auto"
                   style={{
-                    backgroundImage: `url('${mainImage}')`,
+                    backgroundImage: `url('${mainImage.dataUrl}')`,
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                     backgroundRepeat: "no-repeat",
@@ -594,7 +625,8 @@ export default function Home() {
                 </div>
 
                 <div className="text-xs text-gray-500 mt-2 text-center">
-                  Mosaic: {mosaicReady ? "Ready" : "Loading"} | Grid: {cols}×{rows} | Tile: {tileSize}px
+                  Mosaic: {mosaicReady ? "Ready" : "Loading"} | Grid: {mainImage.cols}×{mainImage.rows} | Tile:{" "}
+                  {mainImage.tileSize}px
                 </div>
               </div>
             ) : (
@@ -608,18 +640,6 @@ export default function Home() {
           </div>
         </CardContent>
       </Card>
-
-      <div className="mb-4">
-        <label className="block text-sm font-medium mb-2">Tile Size: {tileSize}px</label>
-        <input
-          type="range"
-          min="20"
-          max="100"
-          value={tileSize}
-          onChange={(e) => setTileSize(Number.parseInt(e.target.value))}
-          className="w-full"
-        />
-      </div>
 
       {/* Instructions */}
       <div className="mt-8 p-4 bg-blue-50 rounded-md">
@@ -639,20 +659,26 @@ export default function Home() {
         <h3 className="font-bold mb-2">Status Information</h3>
         <div>Total Photos: {photos.length}</div>
         <div>
-          Applied Photos: {currentPhotoIndex}/{totalTiles}
+          Applied Photos: {currentPhotoIndex}/{mainImage?.actualTiles || 0}
         </div>
         <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
         <div>Mosaic Ready: {mosaicReady ? "Yes" : "No"}</div>
         <div>
-          Grid Size: {cols}×{rows} = {totalTiles} tiles
+          Grid Size: {mainImage?.cols || 0}×{mainImage?.rows || 0} = {mainImage?.actualTiles || 0} tiles
         </div>
         <div>
-          Tile Size: {tileSize}×{tileSize}px
+          Tile Size: {mainImage?.tileSize || 0}×{mainImage?.tileSize || 0}px
         </div>
         <div>Enhancement: {getRevealPercentage()}%</div>
         <div>Last Photo Check: {lastPhotoCheck.toLocaleTimeString()}</div>
         <div>Auto-check: {autoPolling ? "ON (10s)" : "OFF"}</div>
         <div>Check Status: {photoCheckStatus}</div>
+        {mainImage && (
+          <div>
+            Main Image Settings: {mainImage.filename} | Requested: {mainImage.requestedTiles} | Actual:{" "}
+            {mainImage.actualTiles}
+          </div>
+        )}
       </div>
     </div>
   )
