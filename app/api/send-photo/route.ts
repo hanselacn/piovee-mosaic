@@ -21,6 +21,7 @@ export async function POST(request: Request) {
       hasPhotoData: !!photoData,
       photoDataLength: photoData?.length || 0,
       photoDataPrefix: photoData?.substring(0, 50) || "none",
+      dataSizeKB: photoData ? Math.round(photoData.length / 1024) : 0,
     })
 
     if (!photoData) {
@@ -32,6 +33,19 @@ export async function POST(request: Request) {
     if (!photoData.startsWith("data:image/")) {
       console.error("❌ API Route: Invalid photo data format")
       return NextResponse.json({ error: "Invalid photo data format" }, { status: 400 })
+    }
+
+    // Check photo size (limit to 5MB)
+    const maxSizeBytes = 5 * 1024 * 1024 // 5MB
+    if (photoData.length > maxSizeBytes) {
+      console.error("❌ API Route: Photo too large:", Math.round(photoData.length / 1024), "KB")
+      return NextResponse.json(
+        {
+          error: "Photo too large",
+          details: `Photo size: ${Math.round(photoData.length / 1024)}KB, max allowed: ${Math.round(maxSizeBytes / 1024)}KB`,
+        },
+        { status: 413 },
+      )
     }
 
     // Check environment variables
@@ -110,7 +124,7 @@ export async function POST(request: Request) {
       success: true,
       message: "Photo sent successfully",
       pusherResponse,
-      envCheck, // Include env check in response for debugging
+      photoSize: Math.round(photoData.length / 1024) + "KB",
     })
   } catch (error) {
     console.error("❌ API Route: Unexpected error:", error)

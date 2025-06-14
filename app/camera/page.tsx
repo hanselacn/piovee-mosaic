@@ -16,6 +16,7 @@ export default function CameraPage() {
   const [pusherConnected, setPusherConnected] = useState(false)
   const [lastPhotoResult, setLastPhotoResult] = useState<string | null>(null)
   const [sendingStatus, setSendingStatus] = useState<string>("")
+  const [lastPhotoData, setLastPhotoData] = useState<string>("")
   const shutterSound = useRef<HTMLAudioElement | null>(null)
 
   // Initialize shutter sound and check Pusher connection
@@ -60,7 +61,11 @@ export default function CameraPage() {
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       })
 
@@ -112,9 +117,21 @@ export default function CameraPage() {
 
     if (!context) return
 
-    // Set canvas dimensions to match video
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    // Set canvas dimensions to match video (but limit size for better performance)
+    const maxWidth = 800
+    const maxHeight = 600
+
+    let { videoWidth, videoHeight } = video
+
+    // Scale down if too large
+    if (videoWidth > maxWidth || videoHeight > maxHeight) {
+      const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
+      videoWidth *= ratio
+      videoHeight *= ratio
+    }
+
+    canvas.width = videoWidth
+    canvas.height = videoHeight
 
     // Draw video frame to canvas
     context.drawImage(video, 0, 0, canvas.width, canvas.height)
@@ -124,15 +141,17 @@ export default function CameraPage() {
       shutterSound.current.play().catch((e) => console.error("Error playing sound:", e))
     }
 
-    // Get image data
-    const photoData = canvas.toDataURL("image/jpeg", 0.7) // Compress for better performance
+    // Get image data with higher compression for smaller file size
+    const photoData = canvas.toDataURL("image/jpeg", 0.5) // Reduced quality for smaller size
     setPhotoTaken(true)
+    setLastPhotoData(photoData)
 
     console.log("📸 Photo captured:", {
       width: canvas.width,
       height: canvas.height,
       dataLength: photoData.length,
       dataPrefix: photoData.substring(0, 50),
+      dataSizeKB: Math.round(photoData.length / 1024),
     })
 
     // Send photo via API (which will use Pusher)
@@ -147,6 +166,7 @@ export default function CameraPage() {
 
     try {
       console.log("📡 Sending photo to server...")
+      console.log("📡 Photo data size:", Math.round(photoData.length / 1024), "KB")
       setSendingStatus("Sending to server...")
 
       const response = await fetch("/api/send-photo", {
@@ -158,11 +178,20 @@ export default function CameraPage() {
       })
 
       console.log("📡 Server response status:", response.status)
+      console.log("📡 Server response headers:", Object.fromEntries(response.headers.entries()))
 
       if (!response.ok) {
-        const errorData = await response.json()
-        console.error("❌ Server error:", errorData)
-        throw new Error(`Server error: ${errorData.error || response.statusText}`)
+        const errorText = await response.text()
+        console.error("❌ Server error response:", errorText)
+
+        let errorData
+        try {
+          errorData = JSON.parse(errorText)
+        } catch {
+          errorData = { error: errorText }
+        }
+
+        throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
       }
 
       const result = await response.json()
@@ -180,7 +209,11 @@ export default function CameraPage() {
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
       setSendingStatus(`Error: ${errorMessage}`)
       setLastPhotoResult(`❌ Failed: ${errorMessage}`)
-      alert(`Failed to send photo: ${errorMessage}`)
+
+      // Show detailed error in alert for debugging
+      alert(
+        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
+      )
     } finally {
       setIsSending(false)
     }
@@ -191,6 +224,7 @@ export default function CameraPage() {
     setPhotoTaken(false)
     setLastPhotoResult(null)
     setSendingStatus("")
+    setLastPhotoData("")
   }
 
   // Function to manually reconnect Pusher
@@ -203,7 +237,43 @@ export default function CameraPage() {
     }
   }
 
-  // Test API connection
+  // Test API connection with the actual photo data
+  const testAPIWithPhoto = async () => {
+    if (!lastPhotoData) {
+      alert("Take a photo first!")
+      return
+    }
+
+    try {
+      setSendingStatus("Testing API with actual photo...")
+      const response = await fetch("/api/send-photo", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          photoData: lastPhotoData,
+        }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setSendingStatus("✅ API test with photo successful!")
+        console.log("API test result:", result)
+      } else {
+        const error = await response.text()
+        setSendingStatus(`❌ API test failed: ${error}`)
+        console.error("API test failed:", error)
+      }
+    } catch (error) {
+      setSendingStatus(`❌ API test error: ${error}`)
+      console.error("API test error:", error)
+    }
+
+    setTimeout(() => setSendingStatus(""), 3000)
+  }
+
+  // Test API connection with small test image
   const testAPI = async () => {
     try {
       setSendingStatus("Testing API...")
@@ -258,6 +328,11 @@ export default function CameraPage() {
           <button onClick={testAPI} className="text-xs bg-purple-500 text-white px-2 py-1 rounded ml-2">
             Test API
           </button>
+          {lastPhotoData && (
+            <button onClick={testAPIWithPhoto} className="text-xs bg-orange-500 text-white px-2 py-1 rounded ml-2">
+              Test with Photo
+            </button>
+          )}
         </div>
 
         <Link href="/">
@@ -339,6 +414,11 @@ export default function CameraPage() {
             <Button variant="outline" onClick={stopCamera} disabled={isSending}>
               Close Camera
             </Button>
+            {lastPhotoData && (
+              <Button onClick={() => sendPhotoToServer(lastPhotoData)} disabled={isSending}>
+                Resend Photo
+              </Button>
+            )}
           </>
         )}
 
@@ -366,6 +446,7 @@ export default function CameraPage() {
         <div>Environment: {process.env.NODE_ENV}</div>
         <div>Pusher App Key: {process.env.NEXT_PUBLIC_PUSHER_APP_KEY ? "Set" : "Not Set"}</div>
         <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER}</div>
+        {lastPhotoData && <div>Last Photo Size: {Math.round(lastPhotoData.length / 1024)}KB</div>}
         {lastPhotoResult && <div>Last Result: {lastPhotoResult}</div>}
       </div>
     </div>
