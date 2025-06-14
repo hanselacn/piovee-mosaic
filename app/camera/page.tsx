@@ -17,6 +17,7 @@ export default function CameraPage() {
   const [apiStatus, setApiStatus] = useState<string>("Checking...")
   const [showFlash, setShowFlash] = useState(false)
   const [debugLogs, setDebugLogs] = useState<string[]>([])
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment")
 
   // Add debug log function
   const addDebugLog = (message: string) => {
@@ -58,21 +59,34 @@ export default function CameraPage() {
     }
   }
 
-  // Start camera
+  // Start camera with iPhone-specific settings
   const startCamera = async () => {
     try {
       addDebugLog("📹 Starting camera...")
-      const stream = await navigator.mediaDevices.getUserMedia({
+
+      // iPhone-specific camera constraints
+      const constraints = {
         video: {
-          facingMode: "environment",
-          width: { ideal: 1280 }, // Back to higher resolution since we're not using Pusher
-          height: { ideal: 720 },
+          facingMode: facingMode,
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          // iPhone-specific settings
+          frameRate: { ideal: 30, max: 30 },
         },
         audio: false,
-      })
+      }
+
+      addDebugLog(`📹 Camera constraints: ${JSON.stringify(constraints)}`)
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+
+        // iPhone-specific video settings
+        videoRef.current.setAttribute("playsinline", "true")
+        videoRef.current.setAttribute("webkit-playsinline", "true")
+
         setIsCameraActive(true)
         addDebugLog("✅ Camera started successfully")
 
@@ -104,7 +118,7 @@ export default function CameraPage() {
     }
   }
 
-  // Take photo
+  // Take photo with iPhone-specific handling
   const takePhoto = () => {
     addDebugLog("📸 Starting photo capture process...")
 
@@ -132,9 +146,9 @@ export default function CameraPage() {
       return
     }
 
-    // Use higher resolution since we're uploading directly to Google Drive
-    const maxWidth = 800 // Increased from 400
-    const maxHeight = 600 // Increased from 300
+    // iPhone-optimized resolution
+    const maxWidth = 800
+    const maxHeight = 600
 
     let { videoWidth, videoHeight } = video
     addDebugLog(`📐 Original video dimensions: ${videoWidth}x${videoHeight}`)
@@ -156,25 +170,48 @@ export default function CameraPage() {
     canvas.height = videoHeight
 
     try {
+      // Clear canvas first
+      context.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Draw video frame to canvas
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
       addDebugLog("🎨 Video frame drawn to canvas successfully")
 
-      // Higher quality since we're not limited by Pusher
-      const photoData = canvas.toDataURL("image/jpeg", 0.8) // Increased from 0.5
+      // Convert to base64 with iPhone-compatible settings
+      const photoData = canvas.toDataURL("image/jpeg", 0.8)
+
+      // Validate base64 data
+      if (!photoData || !photoData.startsWith("data:image/jpeg;base64,")) {
+        addDebugLog("❌ Invalid photo data format")
+        alert("Failed to capture photo. Please try again.")
+        return
+      }
+
       setPhotoTaken(true)
       setLastPhotoData(photoData)
 
       const dataSizeKB = Math.round(photoData.length / 1024)
       addDebugLog(`📊 Photo data created: ${dataSizeKB}KB`)
 
+      // Validate base64 content
+      const base64Content = photoData.split(",")[1]
+      if (!base64Content || base64Content.length < 100) {
+        addDebugLog("❌ Base64 content too short or invalid")
+        alert("Photo capture failed. Please try again.")
+        return
+      }
+
+      addDebugLog(`✅ Base64 validation passed: ${base64Content.length} characters`)
+
       // Upload directly to Google Drive
       uploadToGoogleDrive(photoData)
     } catch (error) {
       addDebugLog(`❌ Error in photo capture: ${error}`)
+      alert("Photo capture failed. Please try again.")
     }
   }
 
-  // Upload to Google Drive
+  // Upload to Google Drive with enhanced error handling
   const uploadToGoogleDrive = async (photoData: string) => {
     addDebugLog("🚀 Starting Google Drive upload...")
     setIsSending(true)
@@ -185,6 +222,26 @@ export default function CameraPage() {
     addDebugLog(`📦 Uploading photo of size: ${dataSizeKB}KB`)
 
     try {
+      // Validate photo data before sending
+      if (!photoData.startsWith("data:image/jpeg;base64,")) {
+        throw new Error("Invalid photo data format")
+      }
+
+      const base64Content = photoData.split(",")[1]
+      if (!base64Content || base64Content.length < 100) {
+        throw new Error("Photo data is too short or corrupted")
+      }
+
+      // Test base64 validity
+      try {
+        atob(base64Content.substring(0, 100)) // Test decode first 100 chars
+        addDebugLog("✅ Base64 format validation passed")
+      } catch (decodeError) {
+        throw new Error("Invalid base64 encoding")
+      }
+
+      addDebugLog("📡 Sending POST request to /api/upload-photo...")
+
       const response = await fetch("/api/upload-photo", {
         method: "POST",
         headers: {
@@ -203,14 +260,14 @@ export default function CameraPage() {
           throw new Error("Service account not configured. Please set up Google Service Account.")
         }
 
-        throw new Error(errorData.error || `Upload failed with status ${response.status}`)
+        throw new Error(errorData.details || errorData.error || `Upload failed with status ${response.status}`)
       }
 
       const result = await response.json()
       addDebugLog(`✅ Upload successful: ${JSON.stringify(result)}`)
 
       setSendingStatus("Photo uploaded to Google Drive!")
-      setLastPhotoResult(`✅ Success: Photo uploaded (${result.photoSize})`)
+      setLastPhotoResult(`✅ Success: Photo uploaded (${result.photoSize || dataSizeKB + "KB"})`)
 
       setTimeout(() => setSendingStatus(""), 3000)
     } catch (error) {
@@ -231,6 +288,16 @@ export default function CameraPage() {
     setLastPhotoResult(null)
     setSendingStatus("")
     setLastPhotoData("")
+  }
+
+  // Flip camera (front/back)
+  const flipCamera = () => {
+    addDebugLog("🔄 Flipping camera...")
+    stopCamera()
+    setFacingMode(facingMode === "environment" ? "user" : "environment")
+    setTimeout(() => {
+      startCamera()
+    }, 500)
   }
 
   // Clear debug logs
@@ -298,6 +365,7 @@ export default function CameraPage() {
               ref={videoRef}
               autoPlay
               playsInline
+              webkit-playsinline="true"
               className={`w-full rounded-md ${!isCameraActive || photoTaken ? "hidden" : ""}`}
             ></video>
 
@@ -314,11 +382,16 @@ export default function CameraPage() {
         </CardContent>
       </Card>
 
-      <div className="flex justify-center gap-4">
+      <div className="flex justify-center gap-4 flex-wrap">
         {isCameraActive && !photoTaken && (
-          <Button onClick={takePhoto} disabled={isSending} size="lg" className="px-8">
-            📸 Take Photo
-          </Button>
+          <>
+            <Button onClick={takePhoto} disabled={isSending} size="lg" className="px-8">
+              📸 Take Photo
+            </Button>
+            <Button onClick={flipCamera} disabled={isSending} variant="outline">
+              🔄 Flip Camera
+            </Button>
+          </>
         )}
 
         {photoTaken && (
@@ -351,31 +424,14 @@ export default function CameraPage() {
         </div>
       )}
 
-      {/* Service Account Setup Instructions */}
-      {apiStatus.includes("⚠️") && (
-        <div className="mt-8 p-4 bg-orange-50 rounded-md">
-          <h3 className="font-bold mb-2 text-orange-800">🔧 Service Account Setup Required</h3>
-          <p className="text-sm text-orange-700 mb-2">
-            To enable direct Google Drive uploads without sign-in, set up these environment variables:
-          </p>
-          <ul className="text-xs text-orange-600 space-y-1 font-mono">
-            <li>• GOOGLE_PROJECT_ID</li>
-            <li>• GOOGLE_PRIVATE_KEY</li>
-            <li>• GOOGLE_CLIENT_EMAIL</li>
-            <li>• GOOGLE_DRIVE_FOLDER_ID (optional)</li>
-          </ul>
-        </div>
-      )}
-
-      {/* Benefits */}
-      <div className="mt-4 p-4 bg-green-50 rounded-md">
-        <h3 className="font-bold mb-2 text-green-800">🚀 Direct Google Drive Upload</h3>
-        <ul className="text-sm text-green-700 space-y-1">
-          <li>• ✅ No sign-in required for camera users</li>
-          <li>• 📸 Higher quality photos (800x600, 80% quality)</li>
-          <li>• 💾 Direct upload to Google Drive</li>
-          <li>• 🔄 Photos appear on main mosaic automatically</li>
-          <li>• 📱 No file size limitations like Pusher</li>
+      {/* iPhone-specific info */}
+      <div className="mt-4 p-4 bg-blue-50 rounded-md">
+        <h3 className="font-bold mb-2 text-blue-800">📱 iPhone Camera Features</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• 🔄 Flip Camera: Switch between front and back camera</li>
+          <li>• 📸 Optimized for iPhone: Enhanced base64 validation</li>
+          <li>• 🎯 Auto-focus: Tap screen to focus (if supported)</li>
+          <li>• 📐 Smart sizing: Automatically optimizes photo size</li>
         </ul>
       </div>
 
