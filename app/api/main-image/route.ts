@@ -20,20 +20,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
     }
 
-    const { imageData, filename, requestedTiles } = await request.json()
+    const { imageData } = await request.json()
 
     if (!imageData) {
       return NextResponse.json({ error: "No image data provided" }, { status: 400 })
     }
 
-    if (!filename) {
-      return NextResponse.json({ error: "No filename provided" }, { status: 400 })
-    }
-
-    // Use the same folder as camera photos
+    // Create or get the Mosaic App folder
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
 
-    // Delete existing main images first (files that start with "main-image-")
+    // Delete existing main images first
     const existingFiles = await listFiles(folderId)
     const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
 
@@ -66,11 +62,11 @@ export async function POST(request: NextRequest) {
       console.error("Error clearing collage photos:", error)
     }
 
-    // Generate a unique filename with main-image prefix
-    const mainImageFileName = `main-image-${Date.now()}-${filename}`
+    // Generate a unique filename
+    const fileName = `main-image-${Date.now()}.jpg`
 
     // Upload using the direct HTTP approach
-    const fileId = await uploadFile(imageData, mainImageFileName, folderId)
+    const fileId = await uploadFile(imageData, fileName, folderId)
 
     // Make the file public and get URLs
     const urls = await getPublicUrl(fileId)
@@ -79,8 +75,6 @@ export async function POST(request: NextRequest) {
       success: true,
       fileId,
       urls,
-      filename: mainImageFileName,
-      requestedTiles,
       message: "Main image uploaded successfully and collage photos cleared",
     })
   } catch (error) {
@@ -133,14 +127,6 @@ export async function GET() {
         id: mainImage.id,
         name: mainImage.name,
         dataUrl,
-        filename: mainImage.name,
-        uploadedAt: Date.now(),
-        // Default grid settings
-        requestedTiles: 100,
-        actualTiles: 100,
-        tileSize: 50,
-        cols: 16,
-        rows: 9,
       },
     })
   } catch (error) {
