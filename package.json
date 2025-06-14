@@ -60,6 +60,8 @@
     "next-themes": "latest",
     "nodemailer": "latest",
     "path": "latest",
+    "pusher": "latest",
+    "pusher-js": "latest",
     "react": "^19",
     "react-day-picker": "latest",
     "react-dom": "^19",

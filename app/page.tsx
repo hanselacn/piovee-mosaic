@@ -4,15 +4,19 @@ import { useEffect, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Switch } from "@/components/ui/switch"
 import Link from "next/link"
 import { signIn } from "next-auth/react"
+import {
+  getPusherClient,
+  subscribeToPusherChannel,
+  isPusherConnected,
+  getPusherConnectionState,
+} from "@/lib/pusher-client"
 
 interface PhotoData {
   photoData: string
   timestamp: number
   id: string
-  fileName?: string
 }
 
 export default function Home() {
@@ -23,14 +27,14 @@ export default function Home() {
   const [authError, setAuthError] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null)
+  const [pusherConnected, setPusherConnected] = useState(false)
+  const [pusherState, setPusherState] = useState("uninitialized")
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string>("")
-
-  // New polling states
-  const [autoPolling, setAutoPolling] = useState(true)
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
-  const [lastPhotoCheck, setLastPhotoCheck] = useState<Date>(new Date())
-  const [photoCheckStatus, setPhotoCheckStatus] = useState<string>("Ready")
+  const channelRef = useRef<any>(null)
+  const [cameraPhotos, setCameraPhotos] = useState<PhotoData[]>([])
 
   // Handle authentication error
   const handleAuthError = () => {
@@ -46,119 +50,105 @@ export default function Home() {
     signIn("google", { callbackUrl: window.location.href })
   }
 
+  // Connect to Pusher for real-time photo updates
+  useEffect(() => {
+    try {
+      // Get Pusher client
+      const pusher = getPusherClient()
+
+      // Update connection state immediately
+      setPusherConnected(isPusherConnected())
+      setPusherState(getPusherConnectionState())
+
+      // Subscribe to the mosaic channel
+      const channel = subscribeToPusherChannel("mosaic-channel")
+      channelRef.current = channel
+
+      // Handle connection state changes
+      pusher.connection.bind("connected", () => {
+        console.log("Pusher connected")
+        setPusherConnected(true)
+        setPusherState("connected")
+      })
+
+      pusher.connection.bind("disconnected", () => {
+        console.log("Pusher disconnected")
+        setPusherConnected(false)
+        setPusherState("disconnected")
+      })
+
+      pusher.connection.bind("error", (error: any) => {
+        console.error("Pusher connection error:", error)
+        setPusherConnected(false)
+      })
+
+      pusher.connection.bind("state_change", (states: any) => {
+        console.log("Pusher state changed:", states.previous, "->", states.current)
+        setPusherState(states.current)
+        setPusherConnected(states.current === "connected")
+      })
+
+      // Listen for new photos
+      channel.bind("new-photo", (data: PhotoData) => {
+        console.log("New photo received:", data)
+        setPhotos((prev) => [...prev, data])
+        setLastUpdate(new Date())
+      })
+
+      // Force connection if not already connected
+      if (pusher.connection.state !== "connected") {
+        console.log("Forcing Pusher connection...")
+        pusher.connect()
+      }
+    } catch (error) {
+      console.error("Error setting up Pusher:", error)
+    }
+
+    // Clean up
+    return () => {
+      if (channelRef.current) {
+        channelRef.current.unbind_all()
+      }
+    }
+  }, [])
+
   // Get main image
   const fetchMainImage = async () => {
     try {
-      console.log("🖼️ Fetching main image...")
       const mainImageResponse = await fetch("/api/main-image")
-
       if (mainImageResponse.ok) {
         const mainImageData = await mainImageResponse.json()
-        console.log("✅ Main image response:", mainImageData)
-
-        const imageDataUrl = mainImageData.mainImage?.dataUrl
-        console.log("🖼️ Image data URL exists:", !!imageDataUrl)
-        console.log("🖼️ Image data URL length:", imageDataUrl?.length || 0)
-
-        setMainImage(imageDataUrl || null)
-        console.log("✅ Main image state set:", !!imageDataUrl)
-      } else {
-        console.error("❌ Main image fetch failed:", mainImageResponse.status, mainImageResponse.statusText)
-
-        if (mainImageResponse.status === 401) {
-          const errorData = await mainImageResponse.json()
-          console.error("Auth error details:", errorData)
-          if (errorData.requiresAuth) {
-            handleAuthError()
-            return
-          }
+        setMainImage(mainImageData.mainImage?.dataUrl || null)
+      } else if (mainImageResponse.status === 401) {
+        const errorData = await mainImageResponse.json()
+        if (errorData.requiresAuth) {
+          handleAuthError()
+          return
         }
       }
       setAuthError(false)
     } catch (error) {
-      console.error("❌ Error fetching main image:", error)
+      console.error("Error fetching main image:", error)
     }
   }
 
-  // Get camera photos from Google Drive with duplicate detection
-  const fetchCameraPhotos = async (showStatus = false) => {
+  // Get camera photos from Google Drive
+  const fetchCameraPhotos = async () => {
     try {
-      if (showStatus) {
-        setPhotoCheckStatus("Checking for new photos...")
-      }
-
       console.log("📸 Fetching camera photos...")
       const response = await fetch("/api/camera-photos")
 
-      console.log("📸 Camera photos response status:", response.status)
-
       if (response.ok) {
         const data = await response.json()
-        console.log("📸 Camera photos response data:", data)
-
-        const newPhotos = data.photos || []
-
-        console.log(`📷 Found ${newPhotos.length} photos in Google Drive`)
-        console.log("Photo structure sample:", newPhotos[0])
-
-        // Ensure photos have required structure
-        const formattedPhotos = newPhotos.map((photo: any) => ({
-          id: photo.id || photo.fileName || `photo-${Date.now()}-${Math.random()}`,
-          photoData: photo.photoData || photo.dataUrl,
-          timestamp: photo.timestamp || Date.now(),
-          fileName: photo.fileName || photo.name,
-        }))
-
-        console.log("📷 Formatted photos:", formattedPhotos.length)
-
-        // Check for new photos by comparing IDs
-        const existingIds = new Set(photos.map((p) => p.id))
-        const actuallyNewPhotos = formattedPhotos.filter((photo: PhotoData) => !existingIds.has(photo.id))
-
-        if (actuallyNewPhotos.length > 0) {
-          console.log(`✨ Found ${actuallyNewPhotos.length} new photos`)
-          console.log(
-            "New photos:",
-            actuallyNewPhotos.map((p) => ({ id: p.id, fileName: p.fileName })),
-          )
-
-          setPhotos((prevPhotos) => {
-            // Combine existing and new photos, sort by timestamp (newest first)
-            const combined = [...prevPhotos, ...actuallyNewPhotos]
-            return combined.sort((a, b) => b.timestamp - a.timestamp)
-          })
-          setLastUpdate(new Date())
-
-          if (showStatus) {
-            setPhotoCheckStatus(`✅ Found ${actuallyNewPhotos.length} new photos`)
-          }
-        } else {
-          console.log("📷 No new photos found")
-          if (showStatus) {
-            setPhotoCheckStatus("✅ No new photos")
-          }
-        }
-
-        setLastPhotoCheck(new Date())
+        console.log(`📷 Loaded ${data.photos.length} camera photos`)
+        setCameraPhotos(data.photos || [])
       } else {
-        console.error("❌ Failed to fetch camera photos:", response.status, response.statusText)
-        const errorText = await response.text()
-        console.error("Error details:", errorText)
-
-        if (showStatus) {
-          setPhotoCheckStatus("❌ Failed to check photos")
-        }
+        console.error("Failed to fetch camera photos:", response.status)
+        setCameraPhotos([])
       }
     } catch (error) {
-      console.error("❌ Error fetching camera photos:", error)
-      if (showStatus) {
-        setPhotoCheckStatus("❌ Error checking photos")
-      }
-    }
-
-    // Clear status after 3 seconds
-    if (showStatus) {
-      setTimeout(() => setPhotoCheckStatus("Ready"), 3000)
+      console.error("Error fetching camera photos:", error)
+      setCameraPhotos([])
     }
   }
 
@@ -173,139 +163,102 @@ export default function Home() {
     loadData()
   }, [])
 
-  // Auto-polling every 10 seconds
+  // Controlled auto-refresh for main image every 30 seconds when enabled
   useEffect(() => {
-    if (autoPolling && !authError) {
-      console.log("🔄 Starting auto-polling every 10 seconds")
+    if (autoRefresh && !authError) {
       const interval = setInterval(() => {
-        fetchCameraPhotos()
-      }, 10000) // 10 seconds
+        fetchMainImage()
+        fetchCameraPhotos() // Add this line
+      }, 30000) // 30 seconds for main image only
 
-      setPollingInterval(interval)
+      setRefreshInterval(interval)
 
       return () => {
-        console.log("⏹️ Stopping auto-polling")
         clearInterval(interval)
-        setPollingInterval(null)
+        setRefreshInterval(null)
       }
-    } else if (pollingInterval) {
-      console.log("⏹️ Stopping auto-polling")
-      clearInterval(pollingInterval)
-      setPollingInterval(null)
+    } else if (refreshInterval) {
+      clearInterval(refreshInterval)
+      setRefreshInterval(null)
     }
-  }, [autoPolling, authError]) // Remove photos from dependency to prevent restart
+  }, [autoRefresh, authError])
+
+  // Manual refresh
+  const handleManualRefresh = () => {
+    fetchMainImage()
+    fetchCameraPhotos() // Add this line
+  }
 
   // Draw mosaic when main image or photos change
   useEffect(() => {
-    // Add a small delay to ensure canvas is rendered
-    const timer = setTimeout(() => {
-      console.log("🎨 Mosaic effect triggered (delayed)")
-      console.log("🎨 Main image exists:", !!mainImage)
-      console.log("🎨 Canvas ref exists:", !!canvasRef.current)
-      console.log("🎨 Photos count:", photos.length)
+    if (!mainImage || !canvasRef.current) return
 
-      if (!mainImage) {
-        console.log("🎨 Skipping mosaic draw - no main image")
-        return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    // Load main image
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      // Set canvas size to match image
+      canvas.width = img.width
+      canvas.height = img.height
+
+      // Draw main image
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+      // Calculate grid
+      const cols = Math.floor(canvas.width / tileSize)
+      const rows = Math.floor(canvas.height / tileSize)
+      const actualTileWidth = canvas.width / cols
+      const actualTileHeight = canvas.height / rows
+
+      // Draw grid
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
+      ctx.lineWidth = 1
+
+      for (let i = 0; i <= cols; i++) {
+        ctx.beginPath()
+        ctx.moveTo(i * actualTileWidth, 0)
+        ctx.lineTo(i * actualTileWidth, canvas.height)
+        ctx.stroke()
       }
 
-      if (!canvasRef.current) {
-        console.log("🎨 Skipping mosaic draw - no canvas")
-        return
+      for (let i = 0; i <= rows; i++) {
+        ctx.beginPath()
+        ctx.moveTo(0, i * actualTileHeight)
+        ctx.lineTo(canvas.width, i * actualTileHeight)
+        ctx.stroke()
       }
 
-      const canvas = canvasRef.current
-      const ctx = canvas.getContext("2d")
-      if (!ctx) {
-        console.error("❌ Could not get canvas context")
-        return
-      }
+      // Combine real-time photos and camera photos
+      const allPhotos = [...photos, ...cameraPhotos]
+      console.log(
+        `🎨 Drawing mosaic with ${allPhotos.length} photos (${photos.length} real-time + ${cameraPhotos.length} camera)`,
+      )
 
-      console.log(`🎨 Starting mosaic draw with ${photos.length} photos`)
+      // Draw photos in grid cells
+      allPhotos.forEach((photo, index) => {
+        if (index >= cols * rows) return // Skip if we have more photos than grid cells
 
-      // Load main image
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      img.onload = () => {
-        console.log("✅ Main image loaded for canvas, dimensions:", img.width, "x", img.height)
+        const row = Math.floor(index / cols)
+        const col = index % cols
 
-        // Set canvas size to match image
-        canvas.width = img.width
-        canvas.height = img.height
+        const photoImg = new Image()
+        photoImg.crossOrigin = "anonymous"
+        photoImg.onload = () => {
+          const x = col * actualTileWidth
+          const y = row * actualTileHeight
 
-        // Draw main image
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        console.log("✅ Main image drawn on canvas")
-
-        // Calculate grid
-        const cols = Math.floor(canvas.width / tileSize)
-        const rows = Math.floor(canvas.height / tileSize)
-        const actualTileWidth = canvas.width / cols
-        const actualTileHeight = canvas.height / rows
-
-        console.log(`📐 Grid: ${cols}x${rows}, tile size: ${actualTileWidth}x${actualTileHeight}`)
-
-        // Draw grid
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
-        ctx.lineWidth = 1
-
-        for (let i = 0; i <= cols; i++) {
-          ctx.beginPath()
-          ctx.moveTo(i * actualTileWidth, 0)
-          ctx.lineTo(i * actualTileWidth, canvas.height)
-          ctx.stroke()
+          // Draw photo in grid cell
+          ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
         }
-
-        for (let i = 0; i <= rows; i++) {
-          ctx.beginPath()
-          ctx.moveTo(0, i * actualTileHeight)
-          ctx.lineTo(canvas.width, i * actualTileHeight)
-          ctx.stroke()
-        }
-
-        console.log("✅ Grid drawn on canvas")
-
-        // Draw photos in grid cells
-        photos.forEach((photo, index) => {
-          if (index >= cols * rows) {
-            console.log(`⚠️ Skipping photo ${index} - exceeds grid capacity`)
-            return // Skip if we have more photos than grid cells
-          }
-
-          if (!photo.photoData) {
-            console.error(`❌ Photo ${index} missing photoData:`, photo)
-            return
-          }
-
-          const row = Math.floor(index / cols)
-          const col = index % cols
-
-          const photoImg = new Image()
-          photoImg.crossOrigin = "anonymous"
-          photoImg.onload = () => {
-            const x = col * actualTileWidth
-            const y = row * actualTileHeight
-
-            console.log(`🖼️ Drawing photo ${index} at position (${col}, ${row})`)
-            // Draw photo in grid cell
-            ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
-          }
-          photoImg.onerror = (error) => {
-            console.error(`❌ Failed to load photo ${index}:`, error)
-          }
-          photoImg.src = photo.photoData
-        })
-      }
-      img.onerror = (error) => {
-        console.error("❌ Failed to load main image for canvas:", error)
-      }
-
-      console.log("🎨 Setting main image src:", mainImage.substring(0, 50) + "...")
-      img.src = mainImage
-    }, 100) // 100ms delay
-
-    return () => clearTimeout(timer)
-  }, [mainImage, photos, tileSize])
+        photoImg.src = photo.photoData
+      })
+    }
+    img.src = mainImage
+  }, [mainImage, photos, cameraPhotos, tileSize]) // Add cameraPhotos to dependencies
 
   // Save mosaic to Google Drive
   const saveMosaicToGoogleDrive = async () => {
@@ -356,27 +309,22 @@ export default function Home() {
     }
   }
 
-  // Toggle auto-polling
-  const toggleAutoPolling = () => {
-    setAutoPolling(!autoPolling)
-  }
-
-  // Manual refresh
-  const handleManualRefresh = () => {
-    fetchMainImage()
-    fetchCameraPhotos(true) // Show status for manual refresh
+  // Toggle auto-refresh
+  const toggleAutoRefresh = () => {
+    setAutoRefresh(!autoRefresh)
   }
 
   // Clear all photos
   const clearPhotos = async () => {
     if (confirm("Clear all photos from the mosaic? This will delete camera photos from Google Drive.")) {
-      // Clear local photos
+      // Clear real-time photos
       setPhotos([])
 
       // Clear camera photos from Google Drive
       try {
         const response = await fetch("/api/camera-photos", { method: "DELETE" })
         if (response.ok) {
+          setCameraPhotos([])
           console.log("✅ Camera photos cleared from Google Drive")
         } else {
           console.error("Failed to clear camera photos")
@@ -385,6 +333,11 @@ export default function Home() {
         console.error("Error clearing camera photos:", error)
       }
     }
+  }
+
+  // Manual refresh
+  const handleRefresh = () => {
+    fetchMainImage()
   }
 
   return (
@@ -425,22 +378,26 @@ export default function Home() {
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
-          {/* Auto-polling toggle */}
           <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${autoPolling ? "bg-green-500" : "bg-gray-500"}`}></div>
-            <span>Auto-check: {autoPolling ? "ON" : "OFF"}</span>
-            <Switch checked={autoPolling} onCheckedChange={toggleAutoPolling} className="ml-2" />
+            <div className={`w-3 h-3 rounded-full ${pusherConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+            <span>Real-time: {pusherConnected ? "Connected" : "Disconnected"}</span>
           </div>
-
-          <span>Photos: {photos.length}</span>
-
-          {/* Photo check status */}
-          <span className="text-sm text-gray-600">Status: {photoCheckStatus}</span>
+          <span>
+            Photos: {photos.length + cameraPhotos.length} ({photos.length} real-time + {cameraPhotos.length} camera)
+          </span>
 
           {/* Controls */}
           <div className="flex items-center gap-2">
-            <Button onClick={handleManualRefresh} variant="outline" size="sm">
-              🔄 Check Now
+            <Button
+              onClick={toggleAutoRefresh}
+              variant={autoRefresh ? "default" : "outline"}
+              size="sm"
+              className={autoRefresh ? "bg-green-600 hover:bg-green-700" : ""}
+            >
+              {autoRefresh ? "🔄 Auto-Refresh ON" : "⏸️ Auto-Refresh OFF"}
+            </Button>
+            <Button onClick={handleRefresh} variant="outline" size="sm">
+              🔄 Refresh
             </Button>
             <Button onClick={clearPhotos} variant="outline" size="sm">
               🗑️ Clear Photos
@@ -471,12 +428,7 @@ export default function Home() {
             {loading ? (
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
             ) : mainImage ? (
-              <div>
-                <canvas ref={canvasRef} className="border border-gray-300 max-w-full" />
-                <div className="text-xs text-gray-500 mt-2 text-center">
-                  Canvas: {canvasRef.current ? "Ready" : "Not Ready"}
-                </div>
-              </div>
+              <canvas ref={canvasRef} className="border border-gray-300 max-w-full"></canvas>
             ) : (
               <div className="text-center p-8">
                 <p className="mb-4">No main image uploaded yet.</p>
@@ -507,9 +459,7 @@ export default function Home() {
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Upload a main image first</li>
           <li>• Open camera on any device (no sign-in needed)</li>
-          <li>• Photos are automatically checked every 10 seconds from Google Drive</li>
-          <li>• Toggle "Auto-check" to turn automatic checking on/off</li>
-          <li>• Click "Check Now" to manually check for new photos</li>
+          <li>• Photos appear instantly on the mosaic via real-time connection</li>
           <li>• Click "Save Mosaic" to save the completed collage to Google Drive</li>
           <li>• Use "Clear Photos" to start over with a clean mosaic</li>
         </ul>
@@ -518,13 +468,14 @@ export default function Home() {
       {/* Debug info */}
       <div className="mt-4 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
         <h3 className="font-bold mb-2">Status Information</h3>
-        <div>Total Photos: {photos.length}</div>
+        <div>Real-time Photos: {photos.length}</div>
+        <div>Camera Photos: {cameraPhotos.length}</div>
+        <div>Total Photos: {photos.length + cameraPhotos.length}</div>
         <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
-        <div>Canvas Ready: {canvasRef.current ? "Yes" : "No"}</div>
         <div>Last Update: {lastUpdate.toLocaleTimeString()}</div>
-        <div>Last Photo Check: {lastPhotoCheck.toLocaleTimeString()}</div>
-        <div>Auto-check: {autoPolling ? "ON (10s)" : "OFF"}</div>
-        <div>Check Status: {photoCheckStatus}</div>
+        <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
+        <div>Pusher State: {pusherState}</div>
+        <div>Auto-Refresh: {autoRefresh ? "ON (30s)" : "OFF"}</div>
         <div>Auth Error: {authError ? "Yes" : "No"}</div>
         <div>Loading: {loading ? "Yes" : "No"}</div>
       </div>
