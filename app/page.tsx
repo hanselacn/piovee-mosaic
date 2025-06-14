@@ -54,8 +54,14 @@ export default function Home() {
 
       if (mainImageResponse.ok) {
         const mainImageData = await mainImageResponse.json()
-        console.log("✅ Main image loaded:", mainImageData.mainImage ? "Yes" : "No")
-        setMainImage(mainImageData.mainImage?.dataUrl || null)
+        console.log("✅ Main image response:", mainImageData)
+
+        const imageDataUrl = mainImageData.mainImage?.dataUrl
+        console.log("🖼️ Image data URL exists:", !!imageDataUrl)
+        console.log("🖼️ Image data URL length:", imageDataUrl?.length || 0)
+
+        setMainImage(imageDataUrl || null)
+        console.log("✅ Main image state set:", !!imageDataUrl)
       } else {
         console.error("❌ Main image fetch failed:", mainImageResponse.status, mainImageResponse.statusText)
 
@@ -185,8 +191,18 @@ export default function Home() {
 
   // Draw mosaic when main image or photos change
   useEffect(() => {
-    if (!mainImage || !canvasRef.current) {
-      console.log("🎨 Skipping mosaic draw - missing main image or canvas")
+    console.log("🎨 Mosaic effect triggered")
+    console.log("🎨 Main image exists:", !!mainImage)
+    console.log("🎨 Canvas ref exists:", !!canvasRef.current)
+    console.log("🎨 Photos count:", photos.length)
+
+    if (!mainImage) {
+      console.log("🎨 Skipping mosaic draw - no main image")
+      return
+    }
+
+    if (!canvasRef.current) {
+      console.log("🎨 Skipping mosaic draw - no canvas")
       return
     }
 
@@ -197,13 +213,13 @@ export default function Home() {
       return
     }
 
-    console.log(`🎨 Drawing mosaic with ${photos.length} photos`)
+    console.log(`🎨 Starting mosaic draw with ${photos.length} photos`)
 
     // Load main image
     const img = new Image()
     img.crossOrigin = "anonymous"
     img.onload = () => {
-      console.log("✅ Main image loaded for canvas")
+      console.log("✅ Main image loaded for canvas, dimensions:", img.width, "x", img.height)
 
       // Set canvas size to match image
       canvas.width = img.width
@@ -211,6 +227,7 @@ export default function Home() {
 
       // Draw main image
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      console.log("✅ Main image drawn on canvas")
 
       // Calculate grid
       const cols = Math.floor(canvas.width / tileSize)
@@ -237,6 +254,8 @@ export default function Home() {
         ctx.lineTo(canvas.width, i * actualTileHeight)
         ctx.stroke()
       }
+
+      console.log("✅ Grid drawn on canvas")
 
       // Draw photos in grid cells
       photos.forEach((photo, index) => {
@@ -270,8 +289,10 @@ export default function Home() {
       })
     }
     img.onerror = (error) => {
-      console.error("❌ Failed to load main image:", error)
+      console.error("❌ Failed to load main image for canvas:", error)
     }
+
+    console.log("🎨 Setting main image src:", mainImage.substring(0, 50) + "...")
     img.src = mainImage
   }, [mainImage, photos, tileSize])
 
