@@ -83,21 +83,21 @@ export default function Home() {
     }
   }
 
-  // Get camera photos from Google Drive
+  // Get camera photos from Google Drive Camera Photos folder
   const fetchCameraPhotos = async (showStatus = false) => {
     try {
       if (showStatus) {
         setPhotoCheckStatus("Checking for new photos...")
       }
 
-      console.log("📸 Fetching camera photos...")
+      console.log("📸 Fetching camera photos from Camera Photos folder...")
       const response = await fetch("/api/camera-photos")
 
       if (response.ok) {
         const data = await response.json()
         const newPhotos = data.photos || []
 
-        console.log(`📷 Found ${newPhotos.length} photos from API`)
+        console.log(`📷 Found ${newPhotos.length} photos from Camera Photos folder`)
 
         if (newPhotos.length > 0) {
           // Format photos to match expected structure
@@ -113,7 +113,7 @@ export default function Home() {
           const actuallyNewPhotos = formattedPhotos.filter((photo: PhotoData) => !existingIds.has(photo.id))
 
           if (actuallyNewPhotos.length > 0) {
-            console.log(`✨ Found ${actuallyNewPhotos.length} new photos`)
+            console.log(`✨ Found ${actuallyNewPhotos.length} new photos from Camera Photos folder`)
 
             setPhotos((prevPhotos) => {
               const combined = [...prevPhotos, ...actuallyNewPhotos]
@@ -128,16 +128,16 @@ export default function Home() {
             }
 
             if (showStatus) {
-              setPhotoCheckStatus(`✅ Found ${actuallyNewPhotos.length} new photos`)
+              setPhotoCheckStatus(`✅ Found ${actuallyNewPhotos.length} new photos from Camera Photos`)
             }
           } else {
             if (showStatus) {
-              setPhotoCheckStatus("✅ No new photos")
+              setPhotoCheckStatus("✅ No new photos in Camera Photos")
             }
           }
         } else {
           if (showStatus) {
-            setPhotoCheckStatus("✅ No new photos")
+            setPhotoCheckStatus("✅ No photos in Camera Photos folder")
           }
         }
 
@@ -145,13 +145,13 @@ export default function Home() {
       } else {
         console.error("❌ Failed to fetch camera photos:", response.status)
         if (showStatus) {
-          setPhotoCheckStatus("❌ Failed to check photos")
+          setPhotoCheckStatus("❌ Failed to check Camera Photos folder")
         }
       }
     } catch (error) {
       console.error("❌ Error fetching camera photos:", error)
       if (showStatus) {
-        setPhotoCheckStatus("❌ Error checking photos")
+        setPhotoCheckStatus("❌ Error checking Camera Photos folder")
       }
     }
 
@@ -439,9 +439,9 @@ export default function Home() {
     fetchCameraPhotos(true)
   }
 
-  // Clear all photos
+  // Clear all photos from Camera Photos folder
   const clearPhotos = async () => {
-    if (confirm("Clear all photos from the mosaic? This will delete camera photos from Google Drive.")) {
+    if (confirm("Clear all photos from the mosaic? This will delete camera photos from Camera Photos folder.")) {
       setPhotos([])
       setCurrentPhotoIndex(0)
 
@@ -463,10 +463,10 @@ export default function Home() {
       try {
         const response = await fetch("/api/camera-photos", { method: "DELETE" })
         if (response.ok) {
-          console.log("✅ Camera photos cleared from Google Drive")
+          console.log("✅ Camera photos cleared from Camera Photos folder")
         }
       } catch (error) {
-        console.error("Error clearing camera photos:", error)
+        console.error("Error clearing camera photos from Camera Photos folder:", error)
       }
     }
   }

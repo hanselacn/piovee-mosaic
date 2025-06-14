@@ -1,52 +1,46 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"
-import { uploadFile, createFolderIfNotExists, AuthenticationError } from "@/lib/google-drive"
+import { uploadPhotoWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
 
 export async function POST(request: NextRequest) {
   try {
-    // Check authentication first
-    const session = await getServerSession(authOptions)
-    if (!session?.accessToken) {
-      return NextResponse.json({ error: "Authentication required", requiresAuth: true }, { status: 401 })
-    }
+    console.log("📤 Processing camera photo upload request")
 
-    console.log("📤 Processing photo upload request")
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
+    }
 
     const body = await request.json()
     const { photoData, fileName } = body
 
     if (!photoData || !fileName) {
+      console.error("❌ Missing photo data or filename")
       return NextResponse.json({ error: "Missing photo data or filename" }, { status: 400 })
     }
 
-    console.log("📁 Creating/finding camera photos folder")
+    console.log(`📷 Uploading camera photo: ${fileName}`)
 
-    // Create or get the camera photos folder
-    const folderId = await createFolderIfNotExists("Camera Photos")
-    if (!folderId) {
-      throw new Error("Failed to create or find camera photos folder")
-    }
+    // Upload to the "Camera Photos" folder using service account
+    const fileId = await uploadPhotoWithServiceAccount(photoData, fileName, "Camera Photos")
 
-    console.log("☁️ Uploading photo to Google Drive")
-
-    // Upload the photo
-    const fileId = await uploadFile(photoData, fileName, folderId)
-
-    console.log("✅ Photo uploaded successfully:", fileId)
+    console.log(`✅ Camera photo uploaded successfully: ${fileName} (${fileId})`)
 
     return NextResponse.json({
       success: true,
       fileId,
-      message: "Photo uploaded successfully",
+      message: "Camera photo uploaded successfully",
+      folder: "Camera Photos",
     })
   } catch (error: any) {
-    console.error("❌ Error uploading photo:", error)
+    console.error("❌ Error uploading camera photo:", error)
 
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json({ error: error.message, requiresAuth: true }, { status: 401 })
-    }
-
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Upload failed" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: "Failed to upload camera photo",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
