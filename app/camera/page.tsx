@@ -60,8 +60,8 @@ export default function CameraPage() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 800 }, // Reduced from 1280
+          height: { ideal: 600 }, // Reduced from 720
         },
         audio: false,
       })
@@ -146,9 +146,9 @@ export default function CameraPage() {
 
     addDebugLog("✅ Canvas context available")
 
-    // Set canvas dimensions to match video (but limit size for better performance)
-    const maxWidth = 600
-    const maxHeight = 400
+    // Set canvas dimensions - much smaller for Pusher compatibility
+    const maxWidth = 400 // Reduced from 600
+    const maxHeight = 300 // Reduced from 400
 
     let { videoWidth, videoHeight } = video
     addDebugLog(`📐 Original video dimensions: ${videoWidth}x${videoHeight}`)
@@ -159,13 +159,11 @@ export default function CameraPage() {
       return
     }
 
-    // Scale down if too large
-    if (videoWidth > maxWidth || videoHeight > maxHeight) {
-      const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
-      videoWidth *= ratio
-      videoHeight *= ratio
-      addDebugLog(`📐 Scaled video dimensions: ${videoWidth}x${videoHeight}`)
-    }
+    // Scale down to smaller size for Pusher
+    const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
+    videoWidth *= ratio
+    videoHeight *= ratio
+    addDebugLog(`📐 Scaled video dimensions: ${videoWidth}x${videoHeight}`)
 
     canvas.width = videoWidth
     canvas.height = videoHeight
@@ -182,8 +180,8 @@ export default function CameraPage() {
     }
 
     try {
-      // Get image data with compression for smaller file size
-      const photoData = canvas.toDataURL("image/jpeg", 0.7)
+      // Get image data with higher compression for smaller file size
+      const photoData = canvas.toDataURL("image/jpeg", 0.5) // Reduced from 0.7 to 0.5
       setPhotoTaken(true)
       setLastPhotoData(photoData)
 
@@ -191,15 +189,31 @@ export default function CameraPage() {
       addDebugLog(`📊 Photo data created: ${photoData.length} chars, ${dataSizeKB}KB`)
       addDebugLog(`📊 Photo data prefix: ${photoData.substring(0, 50)}...`)
 
+      // Check if photo is too large for Pusher (limit to ~50KB)
+      if (dataSizeKB > 50) {
+        addDebugLog(`⚠️ Photo size (${dataSizeKB}KB) may be too large for Pusher. Attempting to compress further...`)
+
+        // Try with even higher compression
+        const compressedPhotoData = canvas.toDataURL("image/jpeg", 0.3)
+        const compressedSizeKB = Math.round(compressedPhotoData.length / 1024)
+        addDebugLog(`📊 Compressed photo: ${compressedSizeKB}KB`)
+
+        if (compressedSizeKB < dataSizeKB) {
+          setLastPhotoData(compressedPhotoData)
+          sendPhotoViaPusher(compressedPhotoData)
+        } else {
+          sendPhotoViaPusher(photoData)
+        }
+      } else {
+        sendPhotoViaPusher(photoData)
+      }
+
       console.log("📸 Photo captured:", {
         width: canvas.width,
         height: canvas.height,
         dataLength: photoData.length,
         dataSizeKB: dataSizeKB,
       })
-
-      // Send photo via Pusher
-      sendPhotoViaPusher(photoData)
     } catch (dataError) {
       addDebugLog(`❌ Error creating photo data: ${dataError}`)
       alert("Failed to process photo data. Please try again.")
@@ -214,12 +228,15 @@ export default function CameraPage() {
     setSendingStatus("Preparing photo...")
     setLastPhotoResult(null)
 
+    const dataSizeKB = Math.round(photoData.length / 1024)
+    addDebugLog(`📦 Sending photo of size: ${dataSizeKB}KB`)
+
     try {
       addDebugLog("📡 Preparing POST request to /api/send-photo...")
       setSendingStatus("Sending to mosaic...")
 
       const requestBody = JSON.stringify({ photoData })
-      addDebugLog(`📦 Request body size: ${requestBody.length} chars`)
+      addDebugLog(`📦 Request body size: ${Math.round(requestBody.length / 1024)}KB`)
 
       addDebugLog("📡 Making POST request to /api/send-photo...")
       const response = await fetch("/api/send-photo", {
@@ -231,7 +248,6 @@ export default function CameraPage() {
       })
 
       addDebugLog(`📡 POST /api/send-photo response status: ${response.status}`)
-      addDebugLog(`📡 Response headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`)
 
       if (!response.ok) {
         addDebugLog("❌ Response not OK, getting error data...")
@@ -245,6 +261,12 @@ export default function CameraPage() {
         } catch (parseError) {
           addDebugLog(`❌ Could not parse error response as JSON: ${parseError}`)
           errorData = { error: errorText }
+        }
+
+        // Special handling for 413 (Payload Too Large) errors
+        if (response.status === 413 || errorData.details?.includes("413")) {
+          addDebugLog("❌ Photo too large for Pusher. Need to compress more.")
+          throw new Error(`Photo too large (${dataSizeKB}KB). Please try taking another photo.`)
         }
 
         throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
@@ -272,7 +294,7 @@ export default function CameraPage() {
 
       // Show detailed error in alert for debugging
       alert(
-        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console and debug logs for more details.`,
+        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${dataSizeKB}KB\nTip: Try taking another photo - it may compress better.`,
       )
     } finally {
       setIsSending(false)
@@ -409,8 +431,19 @@ export default function CameraPage() {
         </div>
       )}
 
+      {/* Photo size warning */}
+      <div className="mt-4 p-4 bg-blue-50 rounded-md">
+        <h3 className="font-bold mb-2 text-blue-800">📏 Photo Optimization</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• Photos are automatically compressed for real-time sharing</li>
+          <li>• Target size: Under 50KB for best performance</li>
+          <li>• Resolution: 400x300 pixels optimized for mosaic display</li>
+          <li>• If photo fails to send, try taking another - lighting affects compression</li>
+        </ul>
+      </div>
+
       {/* Debug Logs */}
-      <div className="mt-8 p-4 bg-yellow-50 rounded-md">
+      <div className="mt-4 p-4 bg-yellow-50 rounded-md">
         <div className="flex justify-between items-center mb-2">
           <h3 className="font-bold text-yellow-800">🐛 Debug Logs</h3>
           <Button onClick={clearDebugLogs} variant="outline" size="sm">
@@ -428,18 +461,6 @@ export default function CameraPage() {
             ))
           )}
         </div>
-      </div>
-
-      {/* Instructions */}
-      <div className="mt-4 p-4 bg-green-50 rounded-md">
-        <h3 className="font-bold mb-2 text-green-800">📱 Instant Photo Sharing</h3>
-        <ul className="text-sm text-green-700 space-y-1">
-          <li>• ✅ No sign-in required on this device</li>
-          <li>• 📸 Instant photo capture with flash effect</li>
-          <li>• 🔄 Photos appear instantly on the main mosaic</li>
-          <li>• 📱 Share this camera link with anyone to contribute photos</li>
-          <li>• 💾 Main page can save the completed mosaic to Google Drive</li>
-        </ul>
       </div>
 
       {/* Debug info */}
