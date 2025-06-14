@@ -10,8 +10,14 @@ export async function middleware(request: NextRequest) {
   const isPublicPath =
     path.startsWith("/auth") ||
     path.startsWith("/camera") ||
+    path.startsWith("/upload") ||
+    path === "/" ||
     path === "/api/websocket-proxy" ||
-    path === "/api/collage-photos" // Allow public photo uploads
+    path === "/api/collage-photos" ||
+    path === "/api/main-image" ||
+    path === "/api/camera-photos" ||
+    path === "/api/upload-photo" ||
+    path === "/api/camera-auth"
 
   // Get the token
   const token = await getToken({
@@ -19,7 +25,7 @@ export async function middleware(request: NextRequest) {
     secret: process.env.NEXTAUTH_SECRET,
   })
 
-  // Redirect logic
+  // Redirect logic - only for non-public paths
   if (!token && !isPublicPath) {
     const url = new URL("/auth/signin", request.url)
     url.searchParams.set("callbackUrl", encodeURI(request.url))

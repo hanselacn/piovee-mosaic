@@ -6,7 +6,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Switch } from "@/components/ui/switch"
 import Link from "next/link"
-import { signIn } from "next-auth/react"
 
 interface PhotoData {
   photoData: string
@@ -21,7 +20,7 @@ export default function Home() {
   const [photos, setPhotos] = useState<PhotoData[]>([])
   const [tileSize, setTileSize] = useState(50)
   const [loading, setLoading] = useState(true)
-  const [authError, setAuthError] = useState(false)
+  const [error, setError] = useState<string>("")
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const mosaicRef = useRef<HTMLDivElement>(null)
   const photoLayerRef = useRef<HTMLDivElement>(null)
@@ -43,19 +42,6 @@ export default function Home() {
   const [lastPhotoCheck, setLastPhotoCheck] = useState<Date>(new Date())
   const [photoCheckStatus, setPhotoCheckStatus] = useState<string>("Ready")
 
-  // Handle authentication error
-  const handleAuthError = () => {
-    setAuthError(true)
-    setTimeout(() => {
-      signIn("google", { callbackUrl: window.location.href })
-    }, 3000)
-  }
-
-  // Manual sign-in redirect
-  const handleSignIn = () => {
-    signIn("google", { callbackUrl: window.location.href })
-  }
-
   // Get main image
   const fetchMainImage = async () => {
     try {
@@ -67,19 +53,15 @@ export default function Home() {
         const imageDataUrl = mainImageData.mainImage?.dataUrl
         setMainImage(imageDataUrl || null)
         console.log("✅ Main image loaded")
+        setError("")
       } else {
         console.error("❌ Main image fetch failed:", mainImageResponse.status)
-        if (mainImageResponse.status === 401) {
-          const errorData = await mainImageResponse.json()
-          if (errorData.requiresAuth) {
-            handleAuthError()
-            return
-          }
-        }
+        const errorData = await mainImageResponse.json()
+        setError(`Failed to load main image: ${errorData.error || "Unknown error"}`)
       }
-      setAuthError(false)
     } catch (error) {
       console.error("❌ Error fetching main image:", error)
+      setError(`Error loading main image: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -174,7 +156,7 @@ export default function Home() {
 
   // Auto-polling every 10 seconds
   useEffect(() => {
-    if (autoPolling && !authError) {
+    if (autoPolling) {
       console.log("🔄 Starting auto-polling every 10 seconds")
       const interval = setInterval(() => {
         fetchCameraPhotos()
@@ -192,7 +174,7 @@ export default function Home() {
       clearInterval(pollingInterval)
       setPollingInterval(null)
     }
-  }, [autoPolling, authError])
+  }, [autoPolling])
 
   // Create mosaic structure when main image loads
   useEffect(() => {
@@ -406,10 +388,6 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json()
-        if (response.status === 401 || errorData.requiresAuth) {
-          handleAuthError()
-          return
-        }
         throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
       }
 
@@ -485,19 +463,11 @@ export default function Home() {
     <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">🎨 Layered Mosaic Display</h1>
 
-      {/* Authentication Error Alert */}
-      {authError && (
+      {/* Error Alert */}
+      {error && (
         <Alert className="mb-4 border-red-500 bg-red-50">
           <AlertDescription className="text-red-700">
-            <div className="flex items-center justify-between">
-              <div>
-                <strong>Session Expired</strong>
-                <p className="mt-1">Your session has expired. Redirecting to sign-in page in 3 seconds...</p>
-              </div>
-              <Button onClick={handleSignIn} variant="outline" size="sm" className="ml-4">
-                Sign In Now
-              </Button>
-            </div>
+            <strong>Error:</strong> {error}
           </AlertDescription>
         </Alert>
       )}
