@@ -24,6 +24,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null)
+  const [syncStatus, setSyncStatus] = useState<string>("")
 
   // Handle authentication error
   const handleAuthError = () => {
@@ -39,9 +40,42 @@ export default function Home() {
     signIn("google", { callbackUrl: window.location.href })
   }
 
+  // Sync temporary photos to Google Drive
+  const syncPhotos = async () => {
+    try {
+      setSyncStatus("Syncing photos to Google Drive...")
+      const response = await fetch("/api/sync-photos", {
+        method: "POST",
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.synced > 0) {
+          setSyncStatus(`✅ Synced ${result.synced} new photos!`)
+          setTimeout(() => setSyncStatus(""), 3000)
+        } else {
+          setSyncStatus("")
+        }
+      } else if (response.status === 401) {
+        const errorData = await response.json()
+        if (errorData.requiresAuth) {
+          handleAuthError()
+          return
+        }
+      }
+    } catch (error) {
+      console.error("Error syncing photos:", error)
+      setSyncStatus("❌ Failed to sync photos")
+      setTimeout(() => setSyncStatus(""), 3000)
+    }
+  }
+
   // Get main image and photos
   const fetchData = async () => {
     try {
+      // First sync any temporary photos to Google Drive
+      await syncPhotos()
+
       // Get main image
       const mainImageResponse = await fetch("/api/main-image")
       if (mainImageResponse.ok) {
@@ -55,7 +89,7 @@ export default function Home() {
         }
       }
 
-      // Get collage photos
+      // Get collage photos from Google Drive
       const photosResponse = await fetch("/api/collage-photos")
       if (photosResponse.ok) {
         const photosData = await photosResponse.json()
@@ -200,6 +234,21 @@ export default function Home() {
         </Alert>
       )}
 
+      {/* Sync Status */}
+      {syncStatus && (
+        <div
+          className={`mb-4 p-3 rounded ${
+            syncStatus.includes("❌")
+              ? "bg-red-100 border border-red-400 text-red-700"
+              : syncStatus.includes("✅")
+                ? "bg-green-100 border border-green-400 text-green-700"
+                : "bg-blue-100 border border-blue-400 text-blue-700"
+          }`}
+        >
+          <strong>Sync Status:</strong> {syncStatus}
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -267,13 +316,13 @@ export default function Home() {
 
       {/* Instructions */}
       <div className="mt-8 p-4 bg-blue-50 rounded-md">
-        <h3 className="font-bold mb-2 text-blue-800">How to use:</h3>
+        <h3 className="font-bold mb-2 text-blue-800">How it works:</h3>
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Upload a main image first</li>
           <li>• Open camera on any device (no sign-in needed)</li>
-          <li>• Take photos - they'll be stored in Google Drive</li>
-          <li>• Click "Auto-Refresh ON" to automatically check for new photos every 5 seconds</li>
-          <li>• Use "Refresh Now" for manual updates</li>
+          <li>• Photos are stored temporarily, then synced to Google Drive</li>
+          <li>• Click "Auto-Refresh ON" to automatically sync and check for new photos every 5 seconds</li>
+          <li>• Use "Refresh Now" for manual sync and updates</li>
           <li>• Turn off auto-refresh to save resources when not actively viewing</li>
         </ul>
       </div>
@@ -287,6 +336,7 @@ export default function Home() {
         <div>Auto-Refresh: {autoRefresh ? "ON (5s)" : "OFF"}</div>
         <div>Auth Error: {authError ? "Yes" : "No"}</div>
         <div>Loading: {loading ? "Yes" : "No"}</div>
+        {syncStatus && <div>Sync Status: {syncStatus}</div>}
       </div>
     </div>
   )

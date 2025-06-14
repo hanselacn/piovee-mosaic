@@ -118,22 +118,22 @@ export default function CameraPage() {
       dataSizeKB: Math.round(photoData.length / 1024),
     })
 
-    // Send photo to server (no authentication required)
-    sendPhotoToServer(photoData)
+    // Send photo to temporary storage
+    sendPhotoToTempStorage(photoData)
   }
 
-  // Send photo to server
-  const sendPhotoToServer = async (photoData: string) => {
+  // Send photo to temporary storage
+  const sendPhotoToTempStorage = async (photoData: string) => {
     setIsSending(true)
     setSendingStatus("Preparing photo...")
     setLastPhotoResult(null)
 
     try {
-      console.log("📡 Sending photo to server...")
+      console.log("📡 Sending photo to temporary storage...")
       console.log("📡 Photo data size:", Math.round(photoData.length / 1024), "KB")
-      setSendingStatus("Uploading photo...")
+      setSendingStatus("Storing photo temporarily...")
 
-      const response = await fetch("/api/collage-photos", {
+      const response = await fetch("/api/temp-photos", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -150,24 +150,24 @@ export default function CameraPage() {
       }
 
       const result = await response.json()
-      console.log("✅ Photo uploaded successfully:", result)
+      console.log("✅ Photo stored temporarily:", result)
 
-      setSendingStatus("Photo uploaded successfully!")
-      setLastPhotoResult("✅ Success: Photo added to mosaic!")
+      setSendingStatus("Photo stored successfully!")
+      setLastPhotoResult("✅ Success: Photo will appear on mosaic soon!")
 
       // Clear success message after 3 seconds
       setTimeout(() => {
         setSendingStatus("")
       }, 3000)
     } catch (error) {
-      console.error("❌ Error uploading photo:", error)
+      console.error("❌ Error storing photo:", error)
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
       setSendingStatus(`Error: ${errorMessage}`)
       setLastPhotoResult(`❌ Failed: ${errorMessage}`)
 
       // Show detailed error in alert for debugging
       alert(
-        `Failed to upload photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
+        `Failed to store photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
       )
     } finally {
       setIsSending(false)
@@ -279,7 +279,7 @@ export default function CameraPage() {
               Close Camera
             </Button>
             {lastPhotoData && (
-              <Button onClick={() => sendPhotoToServer(lastPhotoData)} disabled={isSending}>
+              <Button onClick={() => sendPhotoToTempStorage(lastPhotoData)} disabled={isSending}>
                 Retry Upload
               </Button>
             )}
@@ -296,17 +296,17 @@ export default function CameraPage() {
       {isSending && (
         <div className="text-center mt-4">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="mt-2">{sendingStatus || "Uploading photo..."}</p>
+          <p className="mt-2">{sendingStatus || "Storing photo..."}</p>
         </div>
       )}
 
       {/* Instructions */}
       <div className="mt-8 p-4 bg-green-50 rounded-md">
-        <h3 className="font-bold mb-2 text-green-800">📱 Easy Photo Taking</h3>
+        <h3 className="font-bold mb-2 text-green-800">📱 How it works</h3>
         <ul className="text-sm text-green-700 space-y-1">
           <li>• ✅ No sign-in required on this device</li>
-          <li>• 📸 Just take photos and they'll be added to the mosaic</li>
-          <li>• 🔄 Photos appear automatically on the main page</li>
+          <li>• 📸 Photos are stored temporarily when taken</li>
+          <li>• 🔄 Main page syncs photos to Google Drive automatically</li>
           <li>• 📱 Share this camera link with anyone to contribute photos</li>
         </ul>
       </div>
