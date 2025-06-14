@@ -5,13 +5,18 @@ import type React from "react"
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { signIn } from "next-auth/react"
 
 export default function UploadPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [authError, setAuthError] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,6 +34,7 @@ export default function UploadPage() {
     reader.onload = (event) => {
       setSelectedImage(event.target?.result as string)
       setUploadSuccess(false)
+      setAuthError(false)
     }
     reader.readAsDataURL(file)
   }
@@ -51,6 +57,7 @@ export default function UploadPage() {
     reader.onload = (event) => {
       setSelectedImage(event.target?.result as string)
       setUploadSuccess(false)
+      setAuthError(false)
     }
     reader.readAsDataURL(file)
   }
@@ -60,11 +67,26 @@ export default function UploadPage() {
     e.preventDefault()
   }
 
+  // Handle authentication error
+  const handleAuthError = () => {
+    setAuthError(true)
+    // Automatically redirect to sign-in after 3 seconds
+    setTimeout(() => {
+      signIn("google", { callbackUrl: window.location.href })
+    }, 3000)
+  }
+
+  // Manual sign-in redirect
+  const handleSignIn = () => {
+    signIn("google", { callbackUrl: window.location.href })
+  }
+
   // Upload image
   const uploadImage = async () => {
     if (!selectedImage) return
 
     setUploading(true)
+    setAuthError(false)
 
     try {
       const response = await fetch("/api/main-image", {
@@ -75,13 +97,30 @@ export default function UploadPage() {
         body: JSON.stringify({ imageData: selectedImage }),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error("Failed to upload image")
+        // Check if it's an authentication error
+        if (response.status === 401 || data.requiresAuth) {
+          handleAuthError()
+          return
+        }
+        throw new Error(data.error || "Failed to upload image")
       }
 
       setUploadSuccess(true)
     } catch (error) {
       console.error("Error uploading image:", error)
+
+      // Check if the error message indicates authentication failure
+      if (
+        error instanceof Error &&
+        (error.message.includes("Authentication failed") || error.message.includes("sign in again"))
+      ) {
+        handleAuthError()
+        return
+      }
+
       alert("Error uploading image. Please try again.")
     } finally {
       setUploading(false)
@@ -97,6 +136,23 @@ export default function UploadPage() {
           <Button variant="outline">Back to Mosaic</Button>
         </Link>
       </div>
+
+      {/* Authentication Error Alert */}
+      {authError && (
+        <Alert className="mb-4 border-red-500 bg-red-50">
+          <AlertDescription className="text-red-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <strong>Session Expired</strong>
+                <p className="mt-1">Your session has expired. Redirecting to sign-in page in 3 seconds...</p>
+              </div>
+              <Button onClick={handleSignIn} variant="outline" size="sm" className="ml-4">
+                Sign In Now
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card className="mb-4">
         <CardContent className="p-4">
@@ -119,7 +175,7 @@ export default function UploadPage() {
       </Card>
 
       <div className="flex justify-center">
-        <Button onClick={uploadImage} disabled={!selectedImage || uploading} className="w-48">
+        <Button onClick={uploadImage} disabled={!selectedImage || uploading || authError} className="w-48">
           {uploading ? "Uploading..." : "Set as Main Image"}
         </Button>
       </div>
