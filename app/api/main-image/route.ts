@@ -81,7 +81,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { imageData, filename, requestedTiles } = body
+    const { dataUrl, filename, minTiles } = body
+    const imageData = dataUrl // Map dataUrl to imageData for consistency
+    const requestedTiles = minTiles || 100 // Map minTiles to requestedTiles with default
 
     if (!imageData || !filename) {
       return NextResponse.json({ error: "Missing image data or filename" }, { status: 400 })
