@@ -90,8 +90,12 @@ export default function Home() {
       console.log("📸 Fetching camera photos...")
       const response = await fetch("/api/camera-photos")
 
+      console.log("📸 Camera photos response status:", response.status)
+
       if (response.ok) {
         const data = await response.json()
+        console.log("📸 Camera photos response data:", data)
+
         const newPhotos = data.photos || []
 
         console.log(`📷 Found ${newPhotos.length} photos in Google Drive`)
@@ -100,10 +104,12 @@ export default function Home() {
         // Ensure photos have required structure
         const formattedPhotos = newPhotos.map((photo: any) => ({
           id: photo.id || photo.fileName || `photo-${Date.now()}-${Math.random()}`,
-          photoData: photo.dataUrl || photo.photoData,
+          photoData: photo.photoData || photo.dataUrl,
           timestamp: photo.timestamp || Date.now(),
           fileName: photo.fileName || photo.name,
         }))
+
+        console.log("📷 Formatted photos:", formattedPhotos.length)
 
         // Check for new photos by comparing IDs
         const existingIds = new Set(photos.map((p) => p.id))
@@ -187,113 +193,118 @@ export default function Home() {
       clearInterval(pollingInterval)
       setPollingInterval(null)
     }
-  }, [autoPolling, authError, photos]) // Include photos in dependency to detect changes
+  }, [autoPolling, authError]) // Remove photos from dependency to prevent restart
 
   // Draw mosaic when main image or photos change
   useEffect(() => {
-    console.log("🎨 Mosaic effect triggered")
-    console.log("🎨 Main image exists:", !!mainImage)
-    console.log("🎨 Canvas ref exists:", !!canvasRef.current)
-    console.log("🎨 Photos count:", photos.length)
+    // Add a small delay to ensure canvas is rendered
+    const timer = setTimeout(() => {
+      console.log("🎨 Mosaic effect triggered (delayed)")
+      console.log("🎨 Main image exists:", !!mainImage)
+      console.log("🎨 Canvas ref exists:", !!canvasRef.current)
+      console.log("🎨 Photos count:", photos.length)
 
-    if (!mainImage) {
-      console.log("🎨 Skipping mosaic draw - no main image")
-      return
-    }
-
-    if (!canvasRef.current) {
-      console.log("🎨 Skipping mosaic draw - no canvas")
-      return
-    }
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext("2d")
-    if (!ctx) {
-      console.error("❌ Could not get canvas context")
-      return
-    }
-
-    console.log(`🎨 Starting mosaic draw with ${photos.length} photos`)
-
-    // Load main image
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-    img.onload = () => {
-      console.log("✅ Main image loaded for canvas, dimensions:", img.width, "x", img.height)
-
-      // Set canvas size to match image
-      canvas.width = img.width
-      canvas.height = img.height
-
-      // Draw main image
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      console.log("✅ Main image drawn on canvas")
-
-      // Calculate grid
-      const cols = Math.floor(canvas.width / tileSize)
-      const rows = Math.floor(canvas.height / tileSize)
-      const actualTileWidth = canvas.width / cols
-      const actualTileHeight = canvas.height / rows
-
-      console.log(`📐 Grid: ${cols}x${rows}, tile size: ${actualTileWidth}x${actualTileHeight}`)
-
-      // Draw grid
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
-      ctx.lineWidth = 1
-
-      for (let i = 0; i <= cols; i++) {
-        ctx.beginPath()
-        ctx.moveTo(i * actualTileWidth, 0)
-        ctx.lineTo(i * actualTileWidth, canvas.height)
-        ctx.stroke()
+      if (!mainImage) {
+        console.log("🎨 Skipping mosaic draw - no main image")
+        return
       }
 
-      for (let i = 0; i <= rows; i++) {
-        ctx.beginPath()
-        ctx.moveTo(0, i * actualTileHeight)
-        ctx.lineTo(canvas.width, i * actualTileHeight)
-        ctx.stroke()
+      if (!canvasRef.current) {
+        console.log("🎨 Skipping mosaic draw - no canvas")
+        return
       }
 
-      console.log("✅ Grid drawn on canvas")
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext("2d")
+      if (!ctx) {
+        console.error("❌ Could not get canvas context")
+        return
+      }
 
-      // Draw photos in grid cells
-      photos.forEach((photo, index) => {
-        if (index >= cols * rows) {
-          console.log(`⚠️ Skipping photo ${index} - exceeds grid capacity`)
-          return // Skip if we have more photos than grid cells
+      console.log(`🎨 Starting mosaic draw with ${photos.length} photos`)
+
+      // Load main image
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+      img.onload = () => {
+        console.log("✅ Main image loaded for canvas, dimensions:", img.width, "x", img.height)
+
+        // Set canvas size to match image
+        canvas.width = img.width
+        canvas.height = img.height
+
+        // Draw main image
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        console.log("✅ Main image drawn on canvas")
+
+        // Calculate grid
+        const cols = Math.floor(canvas.width / tileSize)
+        const rows = Math.floor(canvas.height / tileSize)
+        const actualTileWidth = canvas.width / cols
+        const actualTileHeight = canvas.height / rows
+
+        console.log(`📐 Grid: ${cols}x${rows}, tile size: ${actualTileWidth}x${actualTileHeight}`)
+
+        // Draw grid
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"
+        ctx.lineWidth = 1
+
+        for (let i = 0; i <= cols; i++) {
+          ctx.beginPath()
+          ctx.moveTo(i * actualTileWidth, 0)
+          ctx.lineTo(i * actualTileWidth, canvas.height)
+          ctx.stroke()
         }
 
-        if (!photo.photoData) {
-          console.error(`❌ Photo ${index} missing photoData:`, photo)
-          return
+        for (let i = 0; i <= rows; i++) {
+          ctx.beginPath()
+          ctx.moveTo(0, i * actualTileHeight)
+          ctx.lineTo(canvas.width, i * actualTileHeight)
+          ctx.stroke()
         }
 
-        const row = Math.floor(index / cols)
-        const col = index % cols
+        console.log("✅ Grid drawn on canvas")
 
-        const photoImg = new Image()
-        photoImg.crossOrigin = "anonymous"
-        photoImg.onload = () => {
-          const x = col * actualTileWidth
-          const y = row * actualTileHeight
+        // Draw photos in grid cells
+        photos.forEach((photo, index) => {
+          if (index >= cols * rows) {
+            console.log(`⚠️ Skipping photo ${index} - exceeds grid capacity`)
+            return // Skip if we have more photos than grid cells
+          }
 
-          console.log(`🖼️ Drawing photo ${index} at position (${col}, ${row})`)
-          // Draw photo in grid cell
-          ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
-        }
-        photoImg.onerror = (error) => {
-          console.error(`❌ Failed to load photo ${index}:`, error)
-        }
-        photoImg.src = photo.photoData
-      })
-    }
-    img.onerror = (error) => {
-      console.error("❌ Failed to load main image for canvas:", error)
-    }
+          if (!photo.photoData) {
+            console.error(`❌ Photo ${index} missing photoData:`, photo)
+            return
+          }
 
-    console.log("🎨 Setting main image src:", mainImage.substring(0, 50) + "...")
-    img.src = mainImage
+          const row = Math.floor(index / cols)
+          const col = index % cols
+
+          const photoImg = new Image()
+          photoImg.crossOrigin = "anonymous"
+          photoImg.onload = () => {
+            const x = col * actualTileWidth
+            const y = row * actualTileHeight
+
+            console.log(`🖼️ Drawing photo ${index} at position (${col}, ${row})`)
+            // Draw photo in grid cell
+            ctx.drawImage(photoImg, x, y, actualTileWidth, actualTileHeight)
+          }
+          photoImg.onerror = (error) => {
+            console.error(`❌ Failed to load photo ${index}:`, error)
+          }
+          photoImg.src = photo.photoData
+        })
+      }
+      img.onerror = (error) => {
+        console.error("❌ Failed to load main image for canvas:", error)
+      }
+
+      console.log("🎨 Setting main image src:", mainImage.substring(0, 50) + "...")
+      img.src = mainImage
+    }, 100) // 100ms delay
+
+    return () => clearTimeout(timer)
   }, [mainImage, photos, tileSize])
 
   // Save mosaic to Google Drive
@@ -460,7 +471,12 @@ export default function Home() {
             {loading ? (
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
             ) : mainImage ? (
-              <canvas ref={canvasRef} className="border border-gray-300 max-w-full"></canvas>
+              <div>
+                <canvas ref={canvasRef} className="border border-gray-300 max-w-full" />
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  Canvas: {canvasRef.current ? "Ready" : "Not Ready"}
+                </div>
+              </div>
             ) : (
               <div className="text-center p-8">
                 <p className="mb-4">No main image uploaded yet.</p>
@@ -504,6 +520,7 @@ export default function Home() {
         <h3 className="font-bold mb-2">Status Information</h3>
         <div>Total Photos: {photos.length}</div>
         <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
+        <div>Canvas Ready: {canvasRef.current ? "Yes" : "No"}</div>
         <div>Last Update: {lastUpdate.toLocaleTimeString()}</div>
         <div>Last Photo Check: {lastPhotoCheck.toLocaleTimeString()}</div>
         <div>Auto-check: {autoPolling ? "ON (10s)" : "OFF"}</div>

@@ -1,98 +1,56 @@
-import { NextResponse } from "next/server"
-import { uploadFileWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
+import { type NextRequest, NextResponse } from "next/server"
+import { uploadPhotoWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    console.log("📸 Camera photo upload request received")
-
-    // Parse request body
-    let body
-    try {
-      body = await request.json()
-    } catch (parseError) {
-      console.error("❌ Failed to parse request body:", parseError)
-      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 })
-    }
-
-    const { photoData } = body
-
-    if (!photoData) {
-      return NextResponse.json({ error: "Photo data is required" }, { status: 400 })
-    }
-
-    // Validate photo data format
-    if (!photoData.startsWith("data:image/")) {
-      return NextResponse.json({ error: "Invalid photo data format" }, { status: 400 })
-    }
-
-    const photoSizeKB = Math.round(photoData.length / 1024)
-    console.log(`📊 Received photo: ${photoSizeKB}KB`)
+    console.log("📤 API: Photo upload request received")
 
     // Check if service account is configured
     if (!isServiceAccountConfigured()) {
-      console.log("⚠️ Service account not configured, falling back to user authentication required")
+      console.error("❌ API: Service account not configured")
       return NextResponse.json(
         {
           error: "Service account not configured",
-          details: "Please configure Google Service Account environment variables for direct uploads",
-          requiresAuth: true,
+          message: "Please configure Google Service Account environment variables",
         },
         { status: 503 },
       )
     }
 
-    // Generate unique filename
+    // Parse request body
+    const body = await request.json()
+    const { photoData } = body
+
+    if (!photoData) {
+      console.error("❌ API: No photo data provided")
+      return NextResponse.json({ error: "No photo data provided" }, { status: 400 })
+    }
+
+    // Generate filename with timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
     const fileName = `camera-photo-${timestamp}.jpg`
 
-    console.log(`📁 Uploading ${fileName} to Google Drive...`)
+    console.log(`📤 API: Uploading photo: ${fileName}`)
 
-    // Upload using service account (folder will be created automatically)
-    const uploadResult = await uploadFileWithServiceAccount(photoData, fileName, "Mosaic Camera Photos")
+    // Upload to Google Drive using service account
+    const fileId = await uploadPhotoWithServiceAccount(photoData, fileName, "Mosaic Camera Photos")
 
-    console.log("✅ Photo uploaded successfully:", uploadResult)
+    console.log(`✅ API: Photo uploaded successfully: ${fileName} (${fileId})`)
 
     return NextResponse.json({
       success: true,
-      message: "Photo uploaded to Google Drive",
-      fileId: uploadResult.fileId,
-      fileName: uploadResult.fileName,
-      folderId: uploadResult.folderId,
-      photoSize: `${photoSizeKB}KB`,
+      message: "Photo uploaded successfully",
+      fileId: fileId,
+      fileName: fileName,
     })
   } catch (error) {
-    console.error("❌ Photo upload error:", error)
-
-    const errorMessage = error instanceof Error ? error.message : "Unknown error"
+    console.error("❌ API: Error uploading photo:", error)
 
     return NextResponse.json(
       {
         error: "Failed to upload photo",
-        details: errorMessage,
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 },
-    )
-  }
-}
-
-// GET endpoint for testing
-export async function GET() {
-  try {
-    const isConfigured = isServiceAccountConfigured()
-    const hasFolderId = !!process.env.GOOGLE_DRIVE_FOLDER_ID
-
-    return NextResponse.json({
-      message: "Camera photo upload API",
-      serviceAccountConfigured: isConfigured,
-      folderIdConfigured: hasFolderId,
-      folderId: process.env.GOOGLE_DRIVE_FOLDER_ID ? "***configured***" : "not set",
-      timestamp: new Date().toISOString(),
-      requiredEnvVars: ["GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY", "GOOGLE_CLIENT_EMAIL"],
-      optionalEnvVars: ["GOOGLE_DRIVE_FOLDER_ID (will create folder if not provided)"],
-    })
-  } catch (error) {
-    return NextResponse.json(
-      { error: "API test failed", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
   }
