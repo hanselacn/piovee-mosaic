@@ -42,6 +42,10 @@ export default function Home() {
   const [lastPhotoCheck, setLastPhotoCheck] = useState<Date>(new Date())
   const [photoCheckStatus, setPhotoCheckStatus] = useState<string>("Ready")
 
+  // Auto-apply states
+  const [autoApply, setAutoApply] = useState(false)
+  const [autoApplyInterval, setAutoApplyInterval] = useState<NodeJS.Timeout | null>(null)
+
   // Get main image
   const fetchMainImage = async () => {
     try {
@@ -175,6 +179,28 @@ export default function Home() {
       setPollingInterval(null)
     }
   }, [autoPolling])
+
+  // Auto-apply photos every 1 second
+  useEffect(() => {
+    if (autoApply && mosaicReady && photos.length > 0 && currentPhotoIndex < totalTiles) {
+      console.log("🔄 Starting auto-apply every 1 second")
+      const interval = setInterval(() => {
+        applyNextPhoto()
+      }, 1000)
+
+      setAutoApplyInterval(interval)
+
+      return () => {
+        console.log("⏹️ Stopping auto-apply")
+        clearInterval(interval)
+        setAutoApplyInterval(null)
+      }
+    } else if (autoApplyInterval) {
+      console.log("⏹️ Stopping auto-apply")
+      clearInterval(autoApplyInterval)
+      setAutoApplyInterval(null)
+    }
+  }, [autoApply, mosaicReady, photos.length, currentPhotoIndex, totalTiles])
 
   // Create mosaic structure when main image loads
   useEffect(() => {
@@ -411,6 +437,11 @@ export default function Home() {
     setAutoPolling(!autoPolling)
   }
 
+  // Toggle auto-apply
+  const toggleAutoApply = () => {
+    setAutoApply(!autoApply)
+  }
+
   // Manual refresh
   const handleManualRefresh = () => {
     fetchMainImage()
@@ -489,11 +520,19 @@ export default function Home() {
 
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-4">
-          {/* Auto-polling toggle */}
-          <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full ${autoPolling ? "bg-green-500" : "bg-gray-500"}`}></div>
-            <span>Auto-check: {autoPolling ? "ON" : "OFF"}</span>
-            <Switch checked={autoPolling} onCheckedChange={toggleAutoPolling} className="ml-2" />
+          {/* Auto-polling and auto-apply toggles */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${autoPolling ? "bg-green-500" : "bg-gray-500"}`}></div>
+              <span>Auto-check: {autoPolling ? "ON" : "OFF"}</span>
+              <Switch checked={autoPolling} onCheckedChange={toggleAutoPolling} className="ml-2" />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${autoApply ? "bg-blue-500" : "bg-gray-500"}`}></div>
+              <span>Auto-apply: {autoApply ? "ON" : "OFF"}</span>
+              <Switch checked={autoApply} onCheckedChange={toggleAutoApply} className="ml-2" />
+            </div>
           </div>
 
           <span>Photos: {photos.length}</span>
@@ -644,6 +683,7 @@ export default function Home() {
         <div>Enhancement: {getRevealPercentage()}%</div>
         <div>Last Photo Check: {lastPhotoCheck.toLocaleTimeString()}</div>
         <div>Auto-check: {autoPolling ? "ON (10s)" : "OFF"}</div>
+        <div>Auto-apply: {autoApply ? "ON (1s)" : "OFF"}</div>
         <div>Check Status: {photoCheckStatus}</div>
       </div>
     </div>
