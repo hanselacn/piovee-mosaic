@@ -348,27 +348,26 @@ export default function CameraPage() {
       <Card className="mb-4">
         <CardContent className="p-4">
           <div className="relative">
-            {!photoTaken ? (
-              <>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className={`w-full rounded-md ${!isCameraActive ? "hidden" : ""}`}
-                ></video>
+            {/* Video element - always visible when camera is active */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className={`w-full rounded-md ${!isCameraActive || photoTaken ? "hidden" : ""}`}
+            ></video>
 
-                {!isCameraActive && (
-                  <div className="flex justify-center items-center h-64 bg-gray-100 rounded-md">
-                    <Button onClick={startCamera}>Start Camera</Button>
-                  </div>
-                )}
+            {/* Canvas element - always present but hidden until photo is taken */}
+            <canvas ref={canvasRef} className={`w-full rounded-md ${!photoTaken ? "hidden" : ""}`}></canvas>
 
-                {/* Flash effect overlay */}
-                {showFlash && <div className="absolute inset-0 bg-white rounded-md animate-pulse opacity-80"></div>}
-              </>
-            ) : (
-              <canvas ref={canvasRef} className="w-full rounded-md"></canvas>
+            {/* Start camera placeholder */}
+            {!isCameraActive && (
+              <div className="flex justify-center items-center h-64 bg-gray-100 rounded-md">
+                <Button onClick={startCamera}>Start Camera</Button>
+              </div>
             )}
+
+            {/* Flash effect overlay */}
+            {showFlash && <div className="absolute inset-0 bg-white rounded-md animate-pulse opacity-80"></div>}
           </div>
         </CardContent>
       </Card>
