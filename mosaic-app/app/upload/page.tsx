@@ -40,9 +40,9 @@ export default function UploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          dataUrl: previewUrl,
+          imageData: previewUrl,
           filename: selectedFile.name,
-          minTiles: requestedTiles,
+          requestedTiles: requestedTiles,
         }),
       })
 
