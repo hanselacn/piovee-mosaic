@@ -245,7 +245,7 @@ export default function Home() {
     Object.assign(photoLayerRef.current.style, gridStyle)
     Object.assign(whiteLayerRef.current.style, gridStyle)
 
-    // Create photo tiles (hidden initially, with soft-light blend mode)
+    // Create photo tiles (hidden initially)
     for (let i = 0; i < newTotalTiles; i++) {
       const photoTile = document.createElement("div")
       photoTile.className = "photo-tile"
@@ -255,13 +255,14 @@ export default function Home() {
         background-size: cover;
         background-position: center;
         opacity: 0;
-        transition: all 0.5s ease-in-out;
+        transition: opacity 0.8s ease-in-out;
         border: 1px solid rgba(255,255,255,0.1);
+        mix-blend-mode: soft-light;
       `
       photoLayerRef.current.appendChild(photoTile)
     }
 
-    // Create white overlay tiles (visible initially)
+    // Create white overlay tiles (visible initially, covering the main image)
     for (let i = 0; i < newTotalTiles; i++) {
       const whiteTile = document.createElement("div")
       whiteTile.className = "white-tile"
@@ -270,7 +271,7 @@ export default function Home() {
         height: ${tileSize}px;
         background-color: white;
         opacity: 1;
-        transition: all 0.5s ease-in-out;
+        transition: opacity 0.8s ease-in-out;
         border: 1px solid rgba(0,0,0,0.1);
       `
       whiteLayerRef.current.appendChild(whiteTile)
@@ -278,10 +279,10 @@ export default function Home() {
 
     setMosaicReady(true)
     setCurrentPhotoIndex(0)
-    console.log("✅ Mosaic structure created with white overlay")
+    console.log("✅ Mosaic structure created - white tiles covering main image")
   }
 
-  // Apply next photo to a random tile (replace white with photo)
+  // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
     if (!mosaicReady || currentPhotoIndex >= tileOrder.length || photos.length === 0) {
       console.log("Cannot apply photo: mosaic not ready or no tiles/photos available")
@@ -301,13 +302,14 @@ export default function Home() {
 
       console.log(`🖼️ Applying photo ${photoIndex} to tile ${tileIndex}`)
 
-      // Hide white tile with animation
-      whiteTile.style.opacity = "0"
-      whiteTile.style.transform = "scale(0.8)"
-
-      // Show photo tile with soft-light effect
+      // First, set up the photo tile with the image
       photoTile.style.backgroundImage = `url('${photo.photoData}')`
-      photoTile.style.opacity = "1"
+
+      // Then animate: fade out white tile and fade in photo tile
+      setTimeout(() => {
+        whiteTile.style.opacity = "0"
+        photoTile.style.opacity = "1"
+      }, 50)
 
       setCurrentPhotoIndex((prev) => prev + 1)
     }
@@ -346,9 +348,26 @@ export default function Home() {
         ctx.drawImage(img, 0, 0, mosaicWidth, mosaicHeight)
       }
 
+      // Draw white tiles first
+      const whiteTiles = whiteLayerRef.current?.children
+      if (whiteTiles) {
+        ctx.fillStyle = "white"
+        for (let i = 0; i < whiteTiles.length; i++) {
+          const tile = whiteTiles[i] as HTMLElement
+          if (tile.style.opacity === "1") {
+            const row = Math.floor(i / cols)
+            const col = i % cols
+            const x = col * tileSize
+            const y = row * tileSize
+            ctx.fillRect(x, y, tileSize, tileSize)
+          }
+        }
+      }
+
       // Draw photos on top with blend mode simulation
       const photoTiles = photoLayerRef.current?.children
       if (photoTiles) {
+        ctx.globalCompositeOperation = "soft-light"
         for (let i = 0; i < photoTiles.length; i++) {
           const tile = photoTiles[i] as HTMLElement
           if (tile.style.opacity === "1" && tile.style.backgroundImage) {
@@ -372,6 +391,7 @@ export default function Home() {
             }
           }
         }
+        ctx.globalCompositeOperation = "source-over" // Reset blend mode
       }
 
       const mosaicData = canvas.toDataURL("image/jpeg", 0.9)
@@ -438,7 +458,6 @@ export default function Home() {
           photoTile.style.opacity = "0"
           photoTile.style.backgroundImage = ""
           whiteTile.style.opacity = "1"
-          whiteTile.style.transform = "scale(1)"
         }
       }
 
@@ -570,11 +589,11 @@ export default function Home() {
             {loading ? (
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
             ) : mainImage ? (
-              <div className="flex justify-center relative">
+              <div className="flex flex-col items-center">
                 {/* Main mosaic container */}
                 <div
                   ref={mosaicRef}
-                  className="relative border border-gray-300 mx-auto"
+                  className="relative border border-gray-300"
                   style={{
                     backgroundImage: `url('${mainImage}')`,
                     backgroundSize: "cover",
@@ -582,14 +601,10 @@ export default function Home() {
                     backgroundRepeat: "no-repeat",
                   }}
                 >
-                  {/* Photo layer with soft-light blend */}
-                  <div
-                    ref={photoLayerRef}
-                    className="absolute inset-0"
-                    style={{ mixBlendMode: "soft-light", zIndex: 1 }}
-                  />
+                  {/* Photo layer - positioned below white layer, with soft-light blend */}
+                  <div ref={photoLayerRef} className="absolute inset-0" style={{ zIndex: 1 }} />
 
-                  {/* White overlay layer */}
+                  {/* White overlay layer - positioned above photo layer */}
                   <div ref={whiteLayerRef} className="absolute inset-0" style={{ zIndex: 2 }} />
                 </div>
 
@@ -607,7 +622,7 @@ export default function Home() {
             )}
           </div>
         </CardContent>
-      </div>
+      </Card>
 
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Tile Size: {tileSize}px</label>
@@ -626,9 +641,10 @@ export default function Home() {
         <h3 className="font-bold mb-2 text-blue-800">How the Layered Mosaic Works:</h3>
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Upload a main image first - it becomes the background</li>
-          <li>• White tiles initially cover the entire main image</li>
-          <li>• Camera photos replace white tiles randomly with soft-light blend effect</li>
+          <li>• White tiles initially cover the entire main image completely</li>
+          <li>• Camera photos replace white tiles with soft-light blend effect</li>
           <li>• Each new photo reveals more of the enhanced main image underneath</li>
+          <li>• The soft-light blend creates a beautiful enhancement effect</li>
           <li>• Use "Apply Photo" to manually place the next photo</li>
           <li>• Auto-check polls Google Drive every 10 seconds for new photos</li>
         </ul>
