@@ -14,6 +14,8 @@ export default function CameraPage() {
   const [countdown, setCountdown] = useState(0)
   const [isSending, setIsSending] = useState(false)
   const [pusherConnected, setPusherConnected] = useState(false)
+  const [lastPhotoResult, setLastPhotoResult] = useState<string | null>(null)
+  const [sendingStatus, setSendingStatus] = useState<string>("")
   const shutterSound = useRef<HTMLAudioElement | null>(null)
 
   // Initialize shutter sound and check Pusher connection
@@ -29,22 +31,22 @@ export default function CameraPage() {
 
       // Listen for connection state changes
       pusher.connection.bind("connected", () => {
-        console.log("Camera: Pusher connected")
+        console.log("📱 Camera: Pusher connected")
         setPusherConnected(true)
       })
 
       pusher.connection.bind("disconnected", () => {
-        console.log("Camera: Pusher disconnected")
+        console.log("📱 Camera: Pusher disconnected")
         setPusherConnected(false)
       })
 
       // Force connection if not already connected
       if (pusher.connection.state !== "connected") {
-        console.log("Camera: Forcing Pusher connection...")
+        console.log("📱 Camera: Forcing Pusher connection...")
         pusher.connect()
       }
     } catch (error) {
-      console.error("Camera: Error setting up Pusher:", error)
+      console.error("📱 Camera: Error setting up Pusher:", error)
     }
 
     return () => {
@@ -126,6 +128,13 @@ export default function CameraPage() {
     const photoData = canvas.toDataURL("image/jpeg", 0.7) // Compress for better performance
     setPhotoTaken(true)
 
+    console.log("📸 Photo captured:", {
+      width: canvas.width,
+      height: canvas.height,
+      dataLength: photoData.length,
+      dataPrefix: photoData.substring(0, 50),
+    })
+
     // Send photo via API (which will use Pusher)
     sendPhotoToServer(photoData)
   }
@@ -133,7 +142,13 @@ export default function CameraPage() {
   // Send photo to server
   const sendPhotoToServer = async (photoData: string) => {
     setIsSending(true)
+    setSendingStatus("Preparing photo...")
+    setLastPhotoResult(null)
+
     try {
+      console.log("📡 Sending photo to server...")
+      setSendingStatus("Sending to server...")
+
       const response = await fetch("/api/send-photo", {
         method: "POST",
         headers: {
@@ -142,14 +157,30 @@ export default function CameraPage() {
         body: JSON.stringify({ photoData }),
       })
 
+      console.log("📡 Server response status:", response.status)
+
       if (!response.ok) {
-        throw new Error("Failed to send photo")
+        const errorData = await response.json()
+        console.error("❌ Server error:", errorData)
+        throw new Error(`Server error: ${errorData.error || response.statusText}`)
       }
 
-      console.log("Photo sent successfully")
+      const result = await response.json()
+      console.log("✅ Photo sent successfully:", result)
+
+      setSendingStatus("Photo sent successfully!")
+      setLastPhotoResult("✅ Success: Photo sent to mosaic!")
+
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setSendingStatus("")
+      }, 3000)
     } catch (error) {
-      console.error("Error sending photo:", error)
-      alert("Failed to send photo. Please try again.")
+      console.error("❌ Error sending photo:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      setSendingStatus(`Error: ${errorMessage}`)
+      setLastPhotoResult(`❌ Failed: ${errorMessage}`)
+      alert(`Failed to send photo: ${errorMessage}`)
     } finally {
       setIsSending(false)
     }
@@ -158,6 +189,8 @@ export default function CameraPage() {
   // Reset photo
   const resetPhoto = () => {
     setPhotoTaken(false)
+    setLastPhotoResult(null)
+    setSendingStatus("")
   }
 
   // Function to manually reconnect Pusher
@@ -168,6 +201,38 @@ export default function CameraPage() {
     } catch (error) {
       console.error("Error reconnecting to Pusher:", error)
     }
+  }
+
+  // Test API connection
+  const testAPI = async () => {
+    try {
+      setSendingStatus("Testing API...")
+      const response = await fetch("/api/send-photo", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          photoData:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setSendingStatus("✅ API test successful!")
+        console.log("API test result:", result)
+      } else {
+        const error = await response.json()
+        setSendingStatus(`❌ API test failed: ${error.error}`)
+        console.error("API test failed:", error)
+      }
+    } catch (error) {
+      setSendingStatus(`❌ API test error: ${error}`)
+      console.error("API test error:", error)
+    }
+
+    setTimeout(() => setSendingStatus(""), 3000)
   }
 
   // Clean up on unmount
@@ -190,12 +255,43 @@ export default function CameraPage() {
               Reconnect
             </button>
           )}
+          <button onClick={testAPI} className="text-xs bg-purple-500 text-white px-2 py-1 rounded ml-2">
+            Test API
+          </button>
         </div>
 
         <Link href="/">
           <Button variant="outline">Back to Mosaic</Button>
         </Link>
       </div>
+
+      {/* Status display */}
+      {sendingStatus && (
+        <div
+          className={`mb-4 p-3 rounded ${
+            sendingStatus.includes("Error") || sendingStatus.includes("Failed")
+              ? "bg-red-100 border border-red-400 text-red-700"
+              : sendingStatus.includes("Success") || sendingStatus.includes("✅")
+                ? "bg-green-100 border border-green-400 text-green-700"
+                : "bg-blue-100 border border-blue-400 text-blue-700"
+          }`}
+        >
+          <strong>Status:</strong> {sendingStatus}
+        </div>
+      )}
+
+      {/* Last photo result */}
+      {lastPhotoResult && (
+        <div
+          className={`mb-4 p-3 rounded ${
+            lastPhotoResult.includes("Failed") || lastPhotoResult.includes("❌")
+              ? "bg-red-100 border border-red-400 text-red-700"
+              : "bg-green-100 border border-green-400 text-green-700"
+          }`}
+        >
+          {lastPhotoResult}
+        </div>
+      )}
 
       <Card className="mb-4">
         <CardContent className="p-4">
@@ -230,8 +326,8 @@ export default function CameraPage() {
 
       <div className="flex justify-center gap-4">
         {isCameraActive && !photoTaken && (
-          <Button onClick={takePhotoWithCountdown} disabled={countdown > 0 || !pusherConnected}>
-            Take Photo
+          <Button onClick={takePhotoWithCountdown} disabled={countdown > 0 || isSending}>
+            {countdown > 0 ? `Taking in ${countdown}...` : "Take Photo"}
           </Button>
         )}
 
@@ -256,7 +352,7 @@ export default function CameraPage() {
       {isSending && (
         <div className="text-center mt-4">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="mt-2">Sending photo...</p>
+          <p className="mt-2">{sendingStatus || "Sending photo..."}</p>
         </div>
       )}
 
@@ -266,9 +362,11 @@ export default function CameraPage() {
         <div>Pusher Connected: {pusherConnected ? "Yes" : "No"}</div>
         <div>Camera Active: {isCameraActive ? "Yes" : "No"}</div>
         <div>Photo Taken: {photoTaken ? "Yes" : "No"}</div>
+        <div>Is Sending: {isSending ? "Yes" : "No"}</div>
         <div>Environment: {process.env.NODE_ENV}</div>
         <div>Pusher App Key: {process.env.NEXT_PUBLIC_PUSHER_APP_KEY ? "Set" : "Not Set"}</div>
         <div>Pusher Cluster: {process.env.NEXT_PUBLIC_PUSHER_CLUSTER}</div>
+        {lastPhotoResult && <div>Last Result: {lastPhotoResult}</div>}
       </div>
     </div>
   )
