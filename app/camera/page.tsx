@@ -10,32 +10,45 @@ export default function CameraPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isCameraActive, setIsCameraActive] = useState(false)
   const [photoTaken, setPhotoTaken] = useState(false)
-  const [countdown, setCountdown] = useState(0)
   const [isSending, setIsSending] = useState(false)
   const [lastPhotoResult, setLastPhotoResult] = useState<string | null>(null)
   const [sendingStatus, setSendingStatus] = useState<string>("")
   const [lastPhotoData, setLastPhotoData] = useState<string>("")
   const [pusherStatus, setPusherStatus] = useState<string>("Connecting...")
-  const shutterSound = useRef<HTMLAudioElement | null>(null)
+  const [showFlash, setShowFlash] = useState(false)
+  const [debugLogs, setDebugLogs] = useState<string[]>([])
 
-  // Initialize shutter sound and test Pusher connection
+  // Add debug log function
+  const addDebugLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString()
+    const logMessage = `[${timestamp}] ${message}`
+    console.log(logMessage)
+    setDebugLogs((prev) => [...prev.slice(-9), logMessage]) // Keep last 10 logs
+  }
+
+  // Test Pusher connection on mount
   useEffect(() => {
-    shutterSound.current = new Audio("/camera-shutter.mp3")
-
-    // Test Pusher connection
+    addDebugLog("🚀 Camera page loaded, testing Pusher connection...")
     testPusherConnection()
   }, [])
 
   // Test Pusher connection
   const testPusherConnection = async () => {
     try {
+      addDebugLog("🔍 Testing Pusher connection with GET /api/send-photo...")
       const response = await fetch("/api/send-photo", { method: "GET" })
+      addDebugLog(`📡 GET /api/send-photo response status: ${response.status}`)
+
       if (response.ok) {
+        const data = await response.text()
+        addDebugLog(`✅ Pusher connection test successful: ${data}`)
         setPusherStatus("✅ Ready to send photos")
       } else {
+        addDebugLog(`❌ Pusher connection test failed with status: ${response.status}`)
         setPusherStatus("❌ Connection issue")
       }
     } catch (error) {
+      addDebugLog(`❌ Pusher connection test error: ${error}`)
       setPusherStatus("❌ Connection failed")
     }
   }
@@ -43,6 +56,7 @@ export default function CameraPage() {
   // Start camera
   const startCamera = async () => {
     try {
+      addDebugLog("📹 Starting camera...")
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
@@ -55,8 +69,10 @@ export default function CameraPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         setIsCameraActive(true)
+        addDebugLog("✅ Camera started successfully")
       }
     } catch (error) {
+      addDebugLog(`❌ Camera start error: ${error}`)
       console.error("Error accessing camera:", error)
       alert("Error accessing camera. Please make sure you have granted camera permissions.")
     }
@@ -64,6 +80,7 @@ export default function CameraPage() {
 
   // Stop camera
   const stopCamera = () => {
+    addDebugLog("🛑 Stopping camera...")
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream
       const tracks = stream.getTracks()
@@ -71,46 +88,45 @@ export default function CameraPage() {
       tracks.forEach((track) => track.stop())
       videoRef.current.srcObject = null
       setIsCameraActive(false)
+      addDebugLog("✅ Camera stopped successfully")
     }
   }
 
-  // Take photo with countdown
-  const takePhotoWithCountdown = () => {
-    setCountdown(3)
-
-    const countdownInterval = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(countdownInterval)
-          takePhoto()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }
-
-  // Take photo
+  // Take photo with flash effect
   const takePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return
+    addDebugLog("📸 Taking photo...")
+
+    if (!videoRef.current || !canvasRef.current) {
+      addDebugLog("❌ Video or canvas ref not available")
+      return
+    }
+
+    // Show flash effect
+    setShowFlash(true)
+    setTimeout(() => setShowFlash(false), 200)
 
     const video = videoRef.current
     const canvas = canvasRef.current
     const context = canvas.getContext("2d")
 
-    if (!context) return
+    if (!context) {
+      addDebugLog("❌ Canvas context not available")
+      return
+    }
 
     // Set canvas dimensions to match video (but limit size for better performance)
     const maxWidth = 600
     const maxHeight = 400
 
     let { videoWidth, videoHeight } = video
+    addDebugLog(`📐 Original video dimensions: ${videoWidth}x${videoHeight}`)
 
     // Scale down if too large
     if (videoWidth > maxWidth || videoHeight > maxHeight) {
       const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight)
       videoWidth *= ratio
       videoHeight *= ratio
+      addDebugLog(`📐 Scaled video dimensions: ${videoWidth}x${videoHeight}`)
     }
 
     canvas.width = videoWidth
@@ -118,22 +134,22 @@ export default function CameraPage() {
 
     // Draw video frame to canvas
     context.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-    // Play shutter sound
-    if (shutterSound.current) {
-      shutterSound.current.play().catch((e) => console.error("Error playing sound:", e))
-    }
+    addDebugLog("🎨 Video frame drawn to canvas")
 
     // Get image data with compression for smaller file size
     const photoData = canvas.toDataURL("image/jpeg", 0.7)
     setPhotoTaken(true)
     setLastPhotoData(photoData)
 
+    const dataSizeKB = Math.round(photoData.length / 1024)
+    addDebugLog(`📊 Photo data created: ${photoData.length} chars, ${dataSizeKB}KB`)
+    addDebugLog(`📊 Photo data prefix: ${photoData.substring(0, 50)}...`)
+
     console.log("📸 Photo captured:", {
       width: canvas.width,
       height: canvas.height,
       dataLength: photoData.length,
-      dataSizeKB: Math.round(photoData.length / 1024),
+      dataSizeKB: dataSizeKB,
     })
 
     // Send photo via Pusher
@@ -142,62 +158,90 @@ export default function CameraPage() {
 
   // Send photo via Pusher
   const sendPhotoViaPusher = async (photoData: string) => {
+    addDebugLog("🚀 Starting photo send process...")
     setIsSending(true)
     setSendingStatus("Preparing photo...")
     setLastPhotoResult(null)
 
     try {
-      console.log("📡 Sending photo via Pusher...")
-      console.log("📡 Photo data size:", Math.round(photoData.length / 1024), "KB")
+      addDebugLog("📡 Preparing POST request to /api/send-photo...")
       setSendingStatus("Sending to mosaic...")
 
+      const requestBody = JSON.stringify({ photoData })
+      addDebugLog(`📦 Request body size: ${requestBody.length} chars`)
+
+      addDebugLog("📡 Making POST request to /api/send-photo...")
       const response = await fetch("/api/send-photo", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ photoData }),
+        body: requestBody,
       })
 
-      console.log("📡 Server response status:", response.status)
+      addDebugLog(`📡 POST /api/send-photo response status: ${response.status}`)
+      addDebugLog(`📡 Response headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`)
 
       if (!response.ok) {
-        const errorData = await response.json()
-        console.error("❌ Server error response:", errorData)
+        addDebugLog("❌ Response not OK, getting error data...")
+        const errorText = await response.text()
+        addDebugLog(`❌ Error response text: ${errorText}`)
+
+        let errorData
+        try {
+          errorData = JSON.parse(errorText)
+          addDebugLog(`❌ Parsed error data: ${JSON.stringify(errorData)}`)
+        } catch (parseError) {
+          addDebugLog(`❌ Could not parse error response as JSON: ${parseError}`)
+          errorData = { error: errorText }
+        }
+
         throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
       }
 
+      addDebugLog("✅ Response OK, parsing result...")
       const result = await response.json()
-      console.log("✅ Photo sent successfully:", result)
+      addDebugLog(`✅ Success response: ${JSON.stringify(result)}`)
 
       setSendingStatus("Photo sent to mosaic!")
       setLastPhotoResult("✅ Success: Photo sent to mosaic display!")
+      addDebugLog("✅ Photo send process completed successfully")
 
       // Clear success message after 3 seconds
       setTimeout(() => {
         setSendingStatus("")
       }, 3000)
     } catch (error) {
-      console.error("❌ Error sending photo:", error)
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      addDebugLog(`❌ Photo send failed: ${errorMessage}`)
+      console.error("❌ Error sending photo:", error)
+
       setSendingStatus(`Error: ${errorMessage}`)
       setLastPhotoResult(`❌ Failed: ${errorMessage}`)
 
       // Show detailed error in alert for debugging
       alert(
-        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console for more details.`,
+        `Failed to send photo: ${errorMessage}\n\nPhoto size: ${Math.round(photoData.length / 1024)}KB\nCheck console and debug logs for more details.`,
       )
     } finally {
       setIsSending(false)
+      addDebugLog("🏁 Photo send process finished")
     }
   }
 
   // Reset photo
   const resetPhoto = () => {
+    addDebugLog("🔄 Resetting photo...")
     setPhotoTaken(false)
     setLastPhotoResult(null)
     setSendingStatus("")
     setLastPhotoData("")
+  }
+
+  // Clear debug logs
+  const clearDebugLogs = () => {
+    setDebugLogs([])
+    addDebugLog("🧹 Debug logs cleared")
   }
 
   // Clean up on unmount
@@ -268,11 +312,8 @@ export default function CameraPage() {
                   </div>
                 )}
 
-                {countdown > 0 && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-md">
-                    <span className="text-white text-7xl font-bold">{countdown}</span>
-                  </div>
-                )}
+                {/* Flash effect overlay */}
+                {showFlash && <div className="absolute inset-0 bg-white rounded-md animate-pulse opacity-80"></div>}
               </>
             ) : (
               <canvas ref={canvasRef} className="w-full rounded-md"></canvas>
@@ -283,8 +324,8 @@ export default function CameraPage() {
 
       <div className="flex justify-center gap-4">
         {isCameraActive && !photoTaken && (
-          <Button onClick={takePhotoWithCountdown} disabled={countdown > 0 || isSending}>
-            {countdown > 0 ? `Taking in ${countdown}...` : "Take Photo"}
+          <Button onClick={takePhoto} disabled={isSending} size="lg" className="px-8">
+            📸 Take Photo
           </Button>
         )}
 
@@ -318,13 +359,34 @@ export default function CameraPage() {
         </div>
       )}
 
+      {/* Debug Logs */}
+      <div className="mt-8 p-4 bg-yellow-50 rounded-md">
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="font-bold text-yellow-800">🐛 Debug Logs</h3>
+          <Button onClick={clearDebugLogs} variant="outline" size="sm">
+            Clear Logs
+          </Button>
+        </div>
+        <div className="text-xs text-yellow-700 space-y-1 max-h-40 overflow-y-auto">
+          {debugLogs.length === 0 ? (
+            <div>No logs yet...</div>
+          ) : (
+            debugLogs.map((log, index) => (
+              <div key={index} className="font-mono">
+                {log}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
       {/* Instructions */}
-      <div className="mt-8 p-4 bg-green-50 rounded-md">
-        <h3 className="font-bold mb-2 text-green-800">📱 Real-time Photo Sharing</h3>
+      <div className="mt-4 p-4 bg-green-50 rounded-md">
+        <h3 className="font-bold mb-2 text-green-800">📱 Instant Photo Sharing</h3>
         <ul className="text-sm text-green-700 space-y-1">
           <li>• ✅ No sign-in required on this device</li>
-          <li>• 📸 Photos appear instantly on the main mosaic</li>
-          <li>• 🔄 Uses real-time connection via Pusher</li>
+          <li>• 📸 Instant photo capture with flash effect</li>
+          <li>• 🔄 Photos appear instantly on the main mosaic</li>
           <li>• 📱 Share this camera link with anyone to contribute photos</li>
           <li>• 💾 Main page can save the completed mosaic to Google Drive</li>
         </ul>
