@@ -1,7 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/app/api/auth/[...nextauth]/route"
-import { createFolderIfNotExists, uploadFile, getFileContent, getPublicUrl, listFiles } from "@/lib/google-drive"
+import {
+  createFolderIfNotExists,
+  uploadFile,
+  getFileContent,
+  getPublicUrl,
+  listFiles,
+  AuthenticationError,
+} from "@/lib/google-drive"
 
 const FOLDER_NAME = "Mosaic App"
 
@@ -9,7 +16,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
     }
 
     const { imageData } = await request.json()
@@ -38,6 +45,19 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error("Error uploading main image:", error)
+
+    // Handle authentication errors specifically
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json(
+        {
+          error: "Authentication failed",
+          message: "Your session has expired. Please sign in again.",
+          requiresAuth: true,
+        },
+        { status: 401 },
+      )
+    }
+
     return NextResponse.json(
       {
         error: "Failed to upload main image",
@@ -52,7 +72,7 @@ export async function GET() {
   try {
     const session = await getServerSession(authOptions)
     if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
     }
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
@@ -77,6 +97,19 @@ export async function GET() {
     })
   } catch (error) {
     console.error("Error getting main image:", error)
+
+    // Handle authentication errors specifically
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json(
+        {
+          error: "Authentication failed",
+          message: "Your session has expired. Please sign in again.",
+          requiresAuth: true,
+        },
+        { status: 401 },
+      )
+    }
+
     return NextResponse.json(
       { error: "Failed to get main image", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },

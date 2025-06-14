@@ -2,11 +2,19 @@ import { google } from "googleapis"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/app/api/auth/[...nextauth]/route"
 
+// Custom error class for authentication failures
+export class AuthenticationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "AuthenticationError"
+  }
+}
+
 // Create a folder in Google Drive if it doesn't exist
 export async function createFolderIfNotExists(folderName: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   const auth = new google.auth.OAuth2()
@@ -38,17 +46,23 @@ export async function createFolderIfNotExists(folderName: string) {
     })
 
     return folder.data.id
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating folder:", error)
+
+    // Check if it's an authentication error
+    if (error.code === 401 || error.status === 401) {
+      throw new AuthenticationError("Authentication failed - please sign in again")
+    }
+
     throw new Error(`Failed to create folder: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
 
-// Upload a file to Google Drive using direct HTTP request (no streams)
+// Upload a file to Google Drive using direct HTTP request
 export async function uploadFile(base64Data: string, fileName: string, folderId: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   try {
@@ -87,13 +101,35 @@ export async function uploadFile(base64Data: string, fileName: string, folderId:
 
     if (!response.ok) {
       const errorText = await response.text()
+
+      // Check if it's an authentication error
+      if (response.status === 401) {
+        throw new AuthenticationError("Authentication failed - please sign in again")
+      }
+
       throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
     const result = await response.json()
     return result.id
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error uploading file to Google Drive:", error)
+
+    // Re-throw authentication errors as-is
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+
+    // Check if the error message contains authentication-related keywords
+    if (
+      error.message &&
+      (error.message.includes("401") ||
+        error.message.includes("Unauthorized") ||
+        error.message.includes("Invalid Credentials"))
+    ) {
+      throw new AuthenticationError("Authentication failed - please sign in again")
+    }
+
     throw new Error(`Failed to upload file: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
@@ -102,7 +138,7 @@ export async function uploadFile(base64Data: string, fileName: string, folderId:
 export async function getFileContent(fileId: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   try {
@@ -113,14 +149,22 @@ export async function getFileContent(fileId: string) {
     })
 
     if (!response.ok) {
+      if (response.status === 401) {
+        throw new AuthenticationError("Authentication failed - please sign in again")
+      }
       throw new Error(`Failed to get file: ${response.status} ${response.statusText}`)
     }
 
     const arrayBuffer = await response.arrayBuffer()
     const base64 = Buffer.from(arrayBuffer).toString("base64")
     return `data:image/jpeg;base64,${base64}`
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error getting file content:", error)
+
+    if (error instanceof AuthenticationError) {
+      throw error
+    }
+
     throw new Error(`Failed to get file content: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
@@ -129,7 +173,7 @@ export async function getFileContent(fileId: string) {
 export async function listFiles(folderId: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   const auth = new google.auth.OAuth2()
@@ -145,8 +189,13 @@ export async function listFiles(folderId: string) {
     })
 
     return response.data.files || []
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error listing files:", error)
+
+    if (error.code === 401 || error.status === 401) {
+      throw new AuthenticationError("Authentication failed - please sign in again")
+    }
+
     throw new Error(`Failed to list files: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
@@ -155,7 +204,7 @@ export async function listFiles(folderId: string) {
 export async function deleteFile(fileId: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   const auth = new google.auth.OAuth2()
@@ -168,8 +217,13 @@ export async function deleteFile(fileId: string) {
       fileId: fileId,
     })
     return true
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting file:", error)
+
+    if (error.code === 401 || error.status === 401) {
+      throw new AuthenticationError("Authentication failed - please sign in again")
+    }
+
     throw new Error(`Failed to delete file: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
@@ -178,7 +232,7 @@ export async function deleteFile(fileId: string) {
 export async function getPublicUrl(fileId: string) {
   const session = await getServerSession(authOptions)
   if (!session?.accessToken) {
-    throw new Error("No access token found")
+    throw new AuthenticationError("No access token found")
   }
 
   const auth = new google.auth.OAuth2()
@@ -207,8 +261,13 @@ export async function getPublicUrl(fileId: string) {
       webViewLink: file.data.webViewLink,
       directLink: `https://drive.google.com/uc?id=${fileId}`,
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error making file public:", error)
+
+    if (error.code === 401 || error.status === 401) {
+      throw new AuthenticationError("Authentication failed - please sign in again")
+    }
+
     throw new Error(`Failed to make file public: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
