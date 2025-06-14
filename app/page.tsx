@@ -245,20 +245,19 @@ export default function Home() {
     Object.assign(photoLayerRef.current.style, gridStyle)
     Object.assign(whiteLayerRef.current.style, gridStyle)
 
-    // Create photo tiles (hidden initially)
+    // Create photo tiles (hidden initially, with soft-light blend mode)
     for (let i = 0; i < newTotalTiles; i++) {
       const photoTile = document.createElement("div")
       photoTile.className = "photo-tile"
       photoTile.style.cssText = `
-        width: ${tileSize}px;
-        height: ${tileSize}px;
-        background-size: cover;
-        background-position: center;
-        opacity: 0;
-        transition: opacity 0.8s ease-in-out;
-        border: 1px solid rgba(255,255,255,0.1);
-        mix-blend-mode: soft-light;
-      `
+    width: ${tileSize}px;
+    height: ${tileSize}px;
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    transition: opacity 0.8s ease-in-out;
+    border: 1px solid rgba(255,255,255,0.1);
+  `
       photoLayerRef.current.appendChild(photoTile)
     }
 
@@ -601,8 +600,15 @@ export default function Home() {
                     backgroundRepeat: "no-repeat",
                   }}
                 >
-                  {/* Photo layer - positioned below white layer, with soft-light blend */}
-                  <div ref={photoLayerRef} className="absolute inset-0" style={{ zIndex: 1 }} />
+                  {/* Photo layer - with soft-light blend mode applied to the entire layer */}
+                  <div
+                    ref={photoLayerRef}
+                    className="absolute inset-0"
+                    style={{
+                      zIndex: 1,
+                      mixBlendMode: "soft-light",
+                    }}
+                  />
 
                   {/* White overlay layer - positioned above photo layer */}
                   <div ref={whiteLayerRef} className="absolute inset-0" style={{ zIndex: 2 }} />
