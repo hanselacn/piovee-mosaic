@@ -1,174 +1,165 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/app/api/auth/[...nextauth]/route"
-import { uploadFile, listFiles, getFileContent, deleteFile, AuthenticationError } from "@/lib/google-drive"
+import {
+  createFolderIfNotExists,
+  uploadFile,
+  getFileContent,
+  getPublicUrl,
+  listFiles,
+  deleteFile,
+  AuthenticationError,
+} from "@/lib/google-drive"
 
-export async function GET() {
-  try {
-    const mainImageFolderId = process.env.GOOGLE_DRIVE_MAIN_IMAGE_FOLDER_ID
-    if (!mainImageFolderId) {
-      return NextResponse.json(
-        {
-          error: "Main image folder not configured. Please set GOOGLE_DRIVE_MAIN_IMAGE_FOLDER_ID environment variable.",
-        },
-        { status: 500 },
-      )
-    }
-
-    console.log("📁 Fetching main image from folder:", mainImageFolderId)
-
-    const files = await listFiles(mainImageFolderId)
-    console.log(`📄 Found ${files.length} files in main image folder`)
-
-    if (files.length === 0) {
-      return NextResponse.json({ mainImage: null })
-    }
-
-    // Get the most recent image file
-    const imageFile = files[0]
-    console.log("🖼️ Getting main image content for:", imageFile.name)
-
-    const imageContent = await getFileContent(imageFile.id!)
-
-    const mainImageData = {
-      dataUrl: imageContent,
-      filename: imageFile.name || "main-image.jpg",
-      uploadedAt: Date.now(),
-      imageId: imageFile.id,
-      // Add default grid settings if not stored elsewhere
-      requestedTiles: 100,
-      actualTiles: 100,
-      tileSize: 50,
-      cols: 16,
-      rows: 9,
-    }
-
-    console.log("✅ Main image loaded successfully")
-
-    return NextResponse.json({
-      mainImage: mainImageData,
-      success: true,
-    })
-  } catch (error: any) {
-    console.error("❌ Error fetching main image:", error)
-
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json({ error: error.message, requiresAuth: true }, { status: 401 })
-    }
-
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch main image" },
-      { status: 500 },
-    )
-  }
-}
+const FOLDER_NAME = "Mosaic App"
 
 export async function POST(request: NextRequest) {
   try {
-    const mainImageFolderId = process.env.GOOGLE_DRIVE_MAIN_IMAGE_FOLDER_ID
-    if (!mainImageFolderId) {
-      return NextResponse.json(
-        {
-          error: "Main image folder not configured. Please set GOOGLE_DRIVE_MAIN_IMAGE_FOLDER_ID environment variable.",
-        },
-        { status: 500 },
-      )
-    }
-
     const session = await getServerSession(authOptions)
-    if (!session?.accessToken) {
-      return NextResponse.json({ error: "Authentication required", requiresAuth: true }, { status: 401 })
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
     }
 
-    const body = await request.json()
-    const { dataUrl, filename, minTiles } = body
-    const imageData = dataUrl // Map dataUrl to imageData for consistency
-    const requestedTiles = minTiles || 100 // Map minTiles to requestedTiles with default
+    const { imageData, filename, requestedTiles } = await request.json()
 
-    if (!imageData || !filename) {
-      return NextResponse.json({ error: "Missing image data or filename" }, { status: 400 })
+    if (!imageData) {
+      return NextResponse.json({ error: "No image data provided" }, { status: 400 })
     }
 
-    console.log("📤 Uploading main image to folder:", mainImageFolderId)
+    if (!filename) {
+      return NextResponse.json({ error: "No filename provided" }, { status: 400 })
+    }
 
-    // Clear existing main images first
-    try {
-      const existingFiles = await listFiles(mainImageFolderId)
-      for (const file of existingFiles) {
-        if (file.id) {
+    // Use the same folder as camera photos
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
+
+    // Delete existing main images first (files that start with "main-image-")
+    const existingFiles = await listFiles(folderId)
+    const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
+
+    for (const file of mainImageFiles) {
+      if (file.id) {
+        try {
           await deleteFile(file.id)
-          console.log("🗑️ Deleted existing main image:", file.name)
+          console.log(`Deleted existing main image: ${file.name}`)
+        } catch (error) {
+          console.error(`Error deleting existing main image ${file.id}:`, error)
         }
       }
-    } catch (deleteError) {
-      console.warn("⚠️ Could not clear existing main images:", deleteError)
     }
 
-    // Upload new main image
-    const fileId = await uploadFile(imageData, filename, mainImageFolderId)
+    // Clear all collage photos when uploading new main image
+    try {
+      const clearResponse = await fetch(`${process.env.NEXTAUTH_URL || "http://localhost:3000"}/api/collage-photos`, {
+        method: "DELETE",
+        headers: {
+          Cookie: request.headers.get("cookie") || "",
+        },
+      })
 
-    console.log("✅ Main image uploaded successfully:", fileId)
+      if (clearResponse.ok) {
+        console.log("Cleared existing collage photos")
+      } else {
+        console.error("Failed to clear collage photos:", await clearResponse.text())
+      }
+    } catch (error) {
+      console.error("Error clearing collage photos:", error)
+    }
+
+    // Generate a unique filename with main-image prefix
+    const mainImageFileName = `main-image-${Date.now()}-${filename}`
+
+    // Upload using the direct HTTP approach
+    const fileId = await uploadFile(imageData, mainImageFileName, folderId)
+
+    // Make the file public and get URLs
+    const urls = await getPublicUrl(fileId)
 
     return NextResponse.json({
       success: true,
       fileId,
-      message: "Main image uploaded successfully",
+      urls,
+      filename: mainImageFileName,
+      requestedTiles,
+      message: "Main image uploaded successfully and collage photos cleared",
     })
-  } catch (error: any) {
-    console.error("❌ Error uploading main image:", error)
+  } catch (error) {
+    console.error("Error uploading main image:", error)
 
+    // Handle authentication errors specifically
     if (error instanceof AuthenticationError) {
-      return NextResponse.json({ error: error.message, requiresAuth: true }, { status: 401 })
+      return NextResponse.json(
+        {
+          error: "Authentication failed",
+          message: "Your session has expired. Please sign in again.",
+          requiresAuth: true,
+        },
+        { status: 401 },
+      )
     }
 
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to upload main image" },
+      {
+        error: "Failed to upload main image",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }
 }
 
-export async function DELETE() {
+export async function GET() {
   try {
-    const mainImageFolderId = process.env.GOOGLE_DRIVE_MAIN_IMAGE_FOLDER_ID
-    if (!mainImageFolderId) {
-      return NextResponse.json({ error: "Main image folder not configured" }, { status: 500 })
-    }
-
     const session = await getServerSession(authOptions)
-    if (!session?.accessToken) {
-      return NextResponse.json({ error: "Authentication required", requiresAuth: true }, { status: 401 })
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
     }
 
-    console.log("🗑️ Deleting main images from folder:", mainImageFolderId)
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await createFolderIfNotExists(FOLDER_NAME))
 
-    const files = await listFiles(mainImageFolderId)
-    let deletedCount = 0
+    // List files to find the most recent main image
+    const files = await listFiles(folderId)
+    const mainImage = files.find((file) => file.name?.startsWith("main-image-"))
 
-    for (const file of files) {
-      if (file.id) {
-        await deleteFile(file.id)
-        deletedCount++
-        console.log("🗑️ Deleted main image:", file.name)
-      }
+    if (!mainImage || !mainImage.id) {
+      return NextResponse.json({ mainImage: null })
     }
 
-    console.log(`✅ Deleted ${deletedCount} main images`)
+    // Get the image content
+    const dataUrl = await getFileContent(mainImage.id)
 
     return NextResponse.json({
-      success: true,
-      deleted: deletedCount,
-      message: `Deleted ${deletedCount} main images`,
+      mainImage: {
+        id: mainImage.id,
+        name: mainImage.name,
+        dataUrl,
+        filename: mainImage.name,
+        uploadedAt: Date.now(),
+        // Default grid settings
+        requestedTiles: 100,
+        actualTiles: 100,
+        tileSize: 50,
+        cols: 16,
+        rows: 9,
+      },
     })
-  } catch (error: any) {
-    console.error("❌ Error deleting main images:", error)
+  } catch (error) {
+    console.error("Error getting main image:", error)
 
+    // Handle authentication errors specifically
     if (error instanceof AuthenticationError) {
-      return NextResponse.json({ error: error.message, requiresAuth: true }, { status: 401 })
+      return NextResponse.json(
+        {
+          error: "Authentication failed",
+          message: "Your session has expired. Please sign in again.",
+          requiresAuth: true,
+        },
+        { status: 401 },
+      )
     }
 
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete main images" },
+      { error: "Failed to get main image", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
   }
