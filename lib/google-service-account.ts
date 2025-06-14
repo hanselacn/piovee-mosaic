@@ -93,22 +93,33 @@ export async function uploadFileWithServiceAccount(
 
     const drive = google.drive({ version: "v3", auth })
 
-    // Find or create the folder (don't rely on environment variable)
-    const folderId = await findOrCreateFolder(drive, folderName)
+    // Use environment folder ID if available, otherwise find/create folder
+    let folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
 
     if (!folderId) {
-      throw new Error("Failed to create or find folder")
+      console.log("📁 No GOOGLE_DRIVE_FOLDER_ID found, creating folder...")
+      folderId = await findOrCreateFolder(drive, folderName)
+    } else {
+      console.log(`📁 Using existing folder ID: ${folderId}`)
+    }
+
+    if (!folderId) {
+      throw new Error("Failed to get or create folder ID")
     }
 
     // Remove data URL prefix if present
     const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, "")
 
-    // Convert base64 to buffer for upload
+    // Create a readable stream from the base64 data
+    const { Readable } = require("stream")
     const buffer = Buffer.from(base64Content, "base64")
+    const stream = new Readable()
+    stream.push(buffer)
+    stream.push(null) // End the stream
 
     console.log(`📁 Uploading ${fileName} to folder ${folderId}...`)
 
-    // Upload file using the simpler files.create method
+    // Upload file using stream
     const fileMetadata = {
       name: fileName,
       parents: [folderId],
@@ -116,7 +127,7 @@ export async function uploadFileWithServiceAccount(
 
     const media = {
       mimeType: "image/jpeg",
-      body: buffer,
+      body: stream,
     }
 
     const response = await drive.files.create({
@@ -149,8 +160,13 @@ export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Ph
 
     const drive = google.drive({ version: "v3", auth })
 
-    // Find the folder first
-    const folderId = await findOrCreateFolder(drive, folderName)
+    // Use environment folder ID if available, otherwise find/create folder
+    let folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+
+    if (!folderId) {
+      console.log("📁 No GOOGLE_DRIVE_FOLDER_ID found, searching for folder...")
+      folderId = await findOrCreateFolder(drive, folderName)
+    }
 
     if (!folderId) {
       console.log("📁 No folder found, returning empty list")
@@ -207,8 +223,13 @@ export async function clearFolderWithServiceAccount(folderName = "Mosaic Camera 
 
     const drive = google.drive({ version: "v3", auth })
 
-    // Find the folder
-    const folderId = await findOrCreateFolder(drive, folderName)
+    // Use environment folder ID if available, otherwise find folder
+    let folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+
+    if (!folderId) {
+      folderId = await findOrCreateFolder(drive, folderName)
+    }
+
     if (!folderId) {
       console.log("📁 No folder found to clear")
       return { deletedCount: 0 }

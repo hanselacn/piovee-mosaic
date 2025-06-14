@@ -79,13 +79,16 @@ export async function POST(request: Request) {
 export async function GET() {
   try {
     const isConfigured = isServiceAccountConfigured()
+    const hasFolderId = !!process.env.GOOGLE_DRIVE_FOLDER_ID
 
     return NextResponse.json({
       message: "Camera photo upload API",
       serviceAccountConfigured: isConfigured,
+      folderIdConfigured: hasFolderId,
+      folderId: process.env.GOOGLE_DRIVE_FOLDER_ID ? "***configured***" : "not set",
       timestamp: new Date().toISOString(),
       requiredEnvVars: ["GOOGLE_PROJECT_ID", "GOOGLE_PRIVATE_KEY", "GOOGLE_CLIENT_EMAIL"],
-      note: "GOOGLE_DRIVE_FOLDER_ID is no longer required - folders are created automatically",
+      optionalEnvVars: ["GOOGLE_DRIVE_FOLDER_ID (will create folder if not provided)"],
     })
   } catch (error) {
     return NextResponse.json(
