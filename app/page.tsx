@@ -377,14 +377,8 @@ export default function Home() {
 
     try {
       setStatus('Resetting mosaic...')
-      
-      // Clear photos
-      await fetch("/api/photos", { method: "DELETE" })
-      
-      // Clear main image
-      await fetch("/api/main-image", { method: "DELETE" })
 
-      // Reset state
+      // Reset state first
       setPhotos([])
       setMainImage(null)
       setMosaicState({

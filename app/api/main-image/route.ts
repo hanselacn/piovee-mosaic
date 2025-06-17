@@ -5,6 +5,10 @@ import {
   getFileContentWithServiceAccount,
   isServiceAccountConfigured,
 } from "@/lib/google-service-account"
+import { writeFile, unlink } from "fs/promises"
+import path from "path"
+
+const MAIN_IMAGE_FILE = path.join(process.cwd(), "photos", "main-image.json")
 
 export async function POST(request: NextRequest) {
   try {
@@ -108,5 +112,19 @@ export async function GET() {
       { error: "Failed to get main image", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
+  }
+}
+
+export async function DELETE() {
+  try {
+    await unlink(MAIN_IMAGE_FILE)
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    // If file doesn't exist, still return success
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return NextResponse.json({ success: true })
+    }
+    console.error("Error deleting main image:", error)
+    return NextResponse.json({ error: "Failed to delete main image" }, { status: 500 })
   }
 }
