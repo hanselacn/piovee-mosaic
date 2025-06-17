@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { getFileContentWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
 
-// Use the specific Camera Photos folder ID
-const CAMERA_PHOTOS_FOLDER_ID = "1xRKxbsGbIATgMo_33vBg-SbB0VUdnGVb"
+// Use Camera Photos folder ID from environment variables with type assertion
+const CAMERA_PHOTOS_FOLDER_ID = process.env.GOOGLE_DRIVE_CAM_PHOTO_ID as string
 
 export async function GET() {
   try {
@@ -12,6 +12,12 @@ export async function GET() {
     if (!isServiceAccountConfigured()) {
       console.error("❌ Service account not configured")
       return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
+    }
+
+    // Check if camera photos folder ID is configured
+    if (!CAMERA_PHOTOS_FOLDER_ID) {
+      console.error("❌ Camera photos folder ID not configured")
+      return NextResponse.json({ error: "Camera photos folder ID not configured" }, { status: 503 })
     }
 
     // Get files from the specific Camera Photos folder
