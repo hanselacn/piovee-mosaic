@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { uploadcollagePhotoWithServiceAccount, isServiceAccountConfigured } from "@/lib/google-service-account"
+import { triggerPusherEvent } from "@/lib/pusher-server"
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest) {
     const fileId = await uploadcollagePhotoWithServiceAccount(photoData, fileName, "Camera Photos")
 
     console.log(`✅ Camera photo uploaded successfully: ${fileName} (${fileId})`)
+
+    // Trigger Pusher event with the filename
+    await triggerPusherEvent("camera-channel", "photo-uploaded", { fileName })
+    console.log("📡 Pusher event triggered for:", fileName)
 
     return NextResponse.json({
       success: true,

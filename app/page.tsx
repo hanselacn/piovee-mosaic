@@ -74,80 +74,100 @@ export default function Home() {
   // Handle new photo from Pusher
   const handleNewPhoto = useCallback(
     (photoData: PhotoData) => {
-      if (!mosaicReady) return
+      console.log("Handling new photo:", photoData.fileName);
+      if (!mosaicReady) {
+        console.log("Mosaic not ready, skipping photo");
+        return;
+      }
 
-      const { currentIndex, tileOrder, totalTiles } = mosaicState
-      if (currentIndex >= totalTiles) return
+      const { currentIndex, tileOrder, totalTiles } = mosaicState;
+      if (currentIndex >= totalTiles) {
+        console.log("No more tiles available");
+        return;
+      }
 
-      const tileIndex = tileOrder[currentIndex]
+      const tileIndex = tileOrder[currentIndex];
+      console.log("Applying photo to tile:", tileIndex);
 
       // Update photo layer
       if (photoLayerRef.current) {
-        const tiles = photoLayerRef.current.children
-        const tile = tiles[tileIndex] as HTMLElement
+        const tiles = photoLayerRef.current.children;
+        const tile = tiles[tileIndex] as HTMLElement;
         if (tile) {
-          tile.style.backgroundImage = `url('${photoData.photoData}')`
-          tile.style.opacity = "1"
+          tile.style.backgroundImage = `url('${photoData.photoData}')`;
+          tile.style.opacity = "1";
+          console.log("Updated photo tile");
         }
       }
 
       // Update white layer
       if (whiteLayerRef.current) {
-        const tiles = whiteLayerRef.current.children
-        const tile = tiles[tileIndex] as HTMLElement
+        const tiles = whiteLayerRef.current.children;
+        const tile = tiles[tileIndex] as HTMLElement;
         if (tile) {
-          tile.style.opacity = "0"
-          tile.style.transform = "scale(0.8)"
+          tile.style.opacity = "0";
+          tile.style.transform = "scale(0.8)";
+          console.log("Updated white tile");
         }
       }
 
       // Update state
-      setPhotos((prev) => [...prev, { ...photoData, tileIndex }])
-      setMosaicState((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
+      setPhotos((prev) => [...prev, { ...photoData, tileIndex }]);
+      setMosaicState((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }));
+      console.log("State updated, new currentIndex:", currentIndex + 1);
     },
     [mosaicReady, mosaicState]
-  )
+  );
 
   // Effect for Pusher setup
   useEffect(() => {
-    if (!mosaicReady) return
+    if (!mosaicReady) {
+      console.log("Mosaic not ready, skipping Pusher setup");
+      return;
+    }
 
-    const pusher = getPusherClient()
-    if (!pusher) return
+    const pusher = getPusherClient();
+    if (!pusher) {
+      console.log("Pusher client not available");
+      return;
+    }
 
+    console.log("Setting up Pusher subscription");
     const unsubscribe = subscribeToPusherChannel(
       pusher,
       "camera-channel",
       "photo-uploaded",
       async (data: { fileName: string }) => {
         try {
-          setStatus("Downloading new photo...")
-          const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`)
-          const json = await res.json()
+          console.log("Received photo notification:", data.fileName);
+          setStatus("Downloading new photo...");
+          
+          const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`);
+          if (!res.ok) throw new Error("Failed to fetch photo");
+          
+          const json = await res.json();
+          console.log("Received photo data:", json.photos?.[0]?.fileName);
+          
           if (json.photos?.[0]?.photoData) {
-            handleNewPhoto(json.photos[0])
-            setStatus("✅ Photo added to mosaic")
-            setTimeout(() => setStatus(""), 3000)
+            handleNewPhoto(json.photos[0]);
+            setStatus("✅ Photo added to mosaic");
+            setTimeout(() => setStatus(""), 3000);
+          } else {
+            throw new Error("No photo data received");
           }
         } catch (err) {
-          console.error("Error fetching photo:", err)
-          setStatus("❌ Failed to add photo")
-          setTimeout(() => setStatus(""), 3000)
+          console.error("Error fetching photo:", err);
+          setStatus("❌ Failed to add photo");
+          setTimeout(() => setStatus(""), 3000);
         }
       }
-    )
+    );
 
     return () => {
-      unsubscribe?.()
-    }
+      console.log("Cleaning up Pusher subscription");
+      unsubscribe?.();
+    };
   }, [mosaicReady, handleNewPhoto])
-
-  // Create mosaic structure when main image loads
-  useEffect(() => {
-    if (mainImage && mosaicRef.current) {
-      createMosaicStructure()
-    }
-  }, [mainImage, mosaicRef.current])
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
@@ -223,84 +243,6 @@ export default function Home() {
     whiteLayer.appendChild(whiteFragment)
     setMosaicReady(true)
   }, [mainImage, mosaicState.tileSize])
-
-  // Create the layered mosaic structure with white overlay
-  const createMosaicStructure = () => {
-    if (!mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
-
-    // Calculate dimensions based on a reference size
-    const containerWidth = 800 // Fixed width for consistency
-    const newCols = Math.floor(containerWidth / mosaicState.tileSize)
-    const newRows = Math.floor((containerWidth * 0.6) / mosaicState.tileSize) // 4:3 aspect ratio
-    const newTotalTiles = newCols * newRows
-
-    console.log(`🎨 Creating mosaic: ${newCols}x${newRows} = ${newTotalTiles} tiles`)
-
-    setMosaicState((prev) => ({ ...prev, cols: newCols, rows: newRows, totalTiles: newTotalTiles }))
-
-    // Create random tile order
-    const newTileOrder = Array.from({ length: newTotalTiles }, (_, i) => i)
-    newTileOrder.sort(() => Math.random() - 0.5)
-    setMosaicState((prev) => ({ ...prev, tileOrder: newTileOrder }))
-
-    // Set container dimensions
-    const mosaicWidth = newCols * mosaicState.tileSize
-    const mosaicHeight = newRows * mosaicState.tileSize
-
-    mosaicRef.current.style.width = `${mosaicWidth}px`
-    mosaicRef.current.style.height = `${mosaicHeight}px`
-
-    // Clear existing tiles
-    photoLayerRef.current.innerHTML = ""
-    whiteLayerRef.current.innerHTML = ""
-
-    // Set up grid layouts
-    const gridStyle = {
-      display: "grid",
-      gridTemplateColumns: `repeat(${newCols}, ${mosaicState.tileSize}px)`,
-      gridTemplateRows: `repeat(${newRows}, ${mosaicState.tileSize}px)`,
-      position: "absolute" as const,
-      inset: "0",
-    }
-
-    Object.assign(photoLayerRef.current.style, gridStyle)
-    Object.assign(whiteLayerRef.current.style, gridStyle)
-
-    // Create photo tiles (hidden initially, with soft-light blend mode)
-    for (let i = 0; i < newTotalTiles; i++) {
-      const photoTile = document.createElement("div")
-      photoTile.className = "photo-tile"
-      photoTile.style.cssText = `
-    width: ${mosaicState.tileSize}px;
-    height: ${mosaicState.tileSize}px;
-    background-size: cover;
-    background-position: center;
-    opacity: 0;
-    transition: opacity 0.8s ease-in-out;
-    border: 1px solid rgba(255,255,255,0.1);
-  `
-      photoLayerRef.current.appendChild(photoTile)
-    }
-
-    // Create white overlay tiles (visible initially, covering the main image)
-    for (let i = 0; i < newTotalTiles; i++) {
-      const whiteTile = document.createElement("div")
-      whiteTile.className = "white-tile"
-      whiteTile.style.cssText = `
-        width: ${mosaicState.tileSize}px;
-        height: ${mosaicState.tileSize}px;
-        background-color: white;
-        opacity: 1;
-        transition: opacity 0.8s ease-in-out;
-        border: 1px solid rgba(0,0,0,0.1);
-      `
-      whiteLayerRef.current.appendChild(whiteTile)
-    }
-
-    setMosaicReady(true)
-    setMosaicState((prev) => ({ ...prev, currentIndex: 0 }))
-    console.log("✅ Mosaic structure created - white tiles covering main image")
-  }
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
