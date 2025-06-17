@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Switch } from "@/components/ui/switch"
 import Link from "next/link"
+import { getPusherClient, subscribeToPusherChannel } from "@/lib/pusher-client"
 
 interface PhotoData {
   photoData: string
@@ -15,199 +15,214 @@ interface PhotoData {
   tileIndex?: number
 }
 
+interface MosaicState {
+  cols: number
+  rows: number
+  tileSize: number
+  totalTiles: number
+  currentIndex: number
+  tileOrder: number[]
+}
+
 export default function Home() {
+  // Core state
   const [mainImage, setMainImage] = useState<string | null>(null)
   const [photos, setPhotos] = useState<PhotoData[]>([])
-  const [tileSize, setTileSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>("")
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+  const [status, setStatus] = useState<string>("")
+
+  // Mosaic state
+  const [mosaicState, setMosaicState] = useState<MosaicState>({
+    cols: 0,
+    rows: 0,
+    tileSize: 50,
+    totalTiles: 0,
+    currentIndex: 0,
+    tileOrder: [],
+  })
+  const [mosaicReady, setMosaicReady] = useState(false)
+
+  // Refs for DOM elements
   const mosaicRef = useRef<HTMLDivElement>(null)
   const photoLayerRef = useRef<HTMLDivElement>(null)
   const whiteLayerRef = useRef<HTMLDivElement>(null)
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<string>("")
 
-  // Mosaic state
-  const [mosaicReady, setMosaicReady] = useState(false)
-  const [totalTiles, setTotalTiles] = useState(0)
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0)
-  const [tileOrder, setTileOrder] = useState<number[]>([])
-  const [cols, setCols] = useState(0)
-  const [rows, setRows] = useState(0)
-
-  // Polling states
-  const [autoPolling, setAutoPolling] = useState(true)
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
-  const [lastPhotoCheck, setLastPhotoCheck] = useState<Date>(new Date())
-  const [photoCheckStatus, setPhotoCheckStatus] = useState<string>("Ready")
-
-  // Auto-apply states
-  const [autoApply, setAutoApply] = useState(false)
-  const [autoApplyInterval, setAutoApplyInterval] = useState<NodeJS.Timeout | null>(null)
-
-  // Get main image
-  const fetchMainImage = async () => {
-    try {
-      console.log("🖼️ Fetching main image...")
-      const mainImageResponse = await fetch("/api/main-image")
-
-      if (mainImageResponse.ok) {
-        const mainImageData = await mainImageResponse.json()
-        const imageDataUrl = mainImageData.mainImage?.dataUrl
-        setMainImage(imageDataUrl || null)
-        console.log("✅ Main image loaded")
-        setError("")
-      } else {
-        console.error("❌ Main image fetch failed:", mainImageResponse.status)
-        const errorData = await mainImageResponse.json()
-        setError(`Failed to load main image: ${errorData.error || "Unknown error"}`)
-      }
-    } catch (error) {
-      console.error("❌ Error fetching main image:", error)
-      setError(`Error loading main image: ${error instanceof Error ? error.message : "Unknown error"}`)
-    }
-  }
-
-  // Get camera photos from Google Drive Camera Photos folder
-  const fetchCameraPhotos = async (showStatus = false) => {
-    try {
-      if (showStatus) {
-        setPhotoCheckStatus("Checking for new photos...")
-      }
-
-      console.log("📸 Fetching camera photos from Camera Photos folder...")
-      const response = await fetch("/api/camera-photos")
-
-      if (response.ok) {
-        const data = await response.json()
-        const newPhotos = data.photos || []
-
-        console.log(`📷 Found ${newPhotos.length} photos from Camera Photos folder`)
-
-        if (newPhotos.length > 0) {
-          // Format photos to match expected structure
-          const formattedPhotos = newPhotos.map((photo: any) => ({
-            id: photo.id || photo.fileName || `photo-${Date.now()}-${Math.random()}`,
-            photoData: photo.photoData || photo.dataUrl,
-            timestamp: photo.timestamp || new Date(photo.createdTime || Date.now()).getTime(),
-            fileName: photo.fileName || photo.name,
-          }))
-
-          // Check for new photos by comparing IDs
-          const existingIds = new Set(photos.map((p) => p.id))
-          const actuallyNewPhotos = formattedPhotos.filter((photo: PhotoData) => !existingIds.has(photo.id))
-
-          if (actuallyNewPhotos.length > 0) {
-            console.log(`✨ Found ${actuallyNewPhotos.length} new photos from Camera Photos folder`)
-
-            setPhotos((prevPhotos) => {
-              const combined = [...prevPhotos, ...actuallyNewPhotos]
-              return combined.sort((a, b) => b.timestamp - a.timestamp)
-            })
-
-            // Apply new photos to mosaic if ready
-            if (mosaicReady) {
-              actuallyNewPhotos.forEach(() => {
-                applyNextPhoto()
-              })
-            }
-
-            if (showStatus) {
-              setPhotoCheckStatus(`✅ Found ${actuallyNewPhotos.length} new photos from Camera Photos`)
-            }
-          } else {
-            if (showStatus) {
-              setPhotoCheckStatus("✅ No new photos in Camera Photos")
-            }
-          }
-        } else {
-          if (showStatus) {
-            setPhotoCheckStatus("✅ No photos in Camera Photos folder")
-          }
-        }
-
-        setLastPhotoCheck(new Date())
-      } else {
-        console.error("❌ Failed to fetch camera photos:", response.status)
-        if (showStatus) {
-          setPhotoCheckStatus("❌ Failed to check Camera Photos folder")
-        }
-      }
-    } catch (error) {
-      console.error("❌ Error fetching camera photos:", error)
-      if (showStatus) {
-        setPhotoCheckStatus("❌ Error checking Camera Photos folder")
-      }
-    }
-
-    // Clear status after 3 seconds
-    if (showStatus) {
-      setTimeout(() => setPhotoCheckStatus("Ready"), 3000)
-    }
-  }
-
-  // Initial data fetch
+  // Load main image on mount
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true)
-      await fetchMainImage()
-      await fetchCameraPhotos()
-      setLoading(false)
-    }
-    loadData()
+    loadMainImage()
   }, [])
 
-  // Auto-polling every 10 seconds
-  useEffect(() => {
-    if (autoPolling) {
-      console.log("🔄 Starting auto-polling every 10 seconds")
-      const interval = setInterval(() => {
-        fetchCameraPhotos()
-      }, 10000)
+  const loadMainImage = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch("/api/main-image")
+      const data = await response.json()
 
-      setPollingInterval(interval)
-
-      return () => {
-        console.log("⏹️ Stopping auto-polling")
-        clearInterval(interval)
-        setPollingInterval(null)
+      if (data.mainImage?.dataUrl) {
+        setMainImage(data.mainImage.dataUrl)
+        await createMosaic()
       }
-    } else if (pollingInterval) {
-      console.log("⏹️ Stopping auto-polling")
-      clearInterval(pollingInterval)
-      setPollingInterval(null)
+    } catch (err) {
+      setError("Failed to load main image")
+      console.error(err)
+    } finally {
+      setLoading(false)
     }
-  }, [autoPolling])
+  }
 
-  // Auto-apply photos every 1 second
-  useEffect(() => {
-    if (autoApply && mosaicReady && photos.length > 0 && currentPhotoIndex < totalTiles) {
-      console.log("🔄 Starting auto-apply every 1 second")
-      const interval = setInterval(() => {
-        applyNextPhoto()
-      }, 1000)
+  // Handle new photo from Pusher
+  const handleNewPhoto = useCallback(
+    (photoData: PhotoData) => {
+      if (!mosaicReady) return
 
-      setAutoApplyInterval(interval)
+      const { currentIndex, tileOrder, totalTiles } = mosaicState
+      if (currentIndex >= totalTiles) return
 
-      return () => {
-        console.log("⏹️ Stopping auto-apply")
-        clearInterval(interval)
-        setAutoApplyInterval(null)
+      const tileIndex = tileOrder[currentIndex]
+
+      // Update photo layer
+      if (photoLayerRef.current) {
+        const tiles = photoLayerRef.current.children
+        const tile = tiles[tileIndex] as HTMLElement
+        if (tile) {
+          tile.style.backgroundImage = `url('${photoData.photoData}')`
+          tile.style.opacity = "1"
+        }
       }
-    } else if (autoApplyInterval) {
-      console.log("⏹️ Stopping auto-apply")
-      clearInterval(autoApplyInterval)
-      setAutoApplyInterval(null)
+
+      // Update white layer
+      if (whiteLayerRef.current) {
+        const tiles = whiteLayerRef.current.children
+        const tile = tiles[tileIndex] as HTMLElement
+        if (tile) {
+          tile.style.opacity = "0"
+          tile.style.transform = "scale(0.8)"
+        }
+      }
+
+      // Update state
+      setPhotos((prev) => [...prev, { ...photoData, tileIndex }])
+      setMosaicState((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
+    },
+    [mosaicReady, mosaicState]
+  )
+
+  // Effect for Pusher setup
+  useEffect(() => {
+    if (!mosaicReady) return
+
+    const pusher = getPusherClient()
+    if (!pusher) return
+
+    const unsubscribe = subscribeToPusherChannel(
+      pusher,
+      "camera-channel",
+      "photo-uploaded",
+      async (data: { fileName: string }) => {
+        try {
+          setStatus("Downloading new photo...")
+          const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`)
+          const json = await res.json()
+          if (json.photos?.[0]?.photoData) {
+            handleNewPhoto(json.photos[0])
+            setStatus("✅ Photo added to mosaic")
+            setTimeout(() => setStatus(""), 3000)
+          }
+        } catch (err) {
+          console.error("Error fetching photo:", err)
+          setStatus("❌ Failed to add photo")
+          setTimeout(() => setStatus(""), 3000)
+        }
+      }
+    )
+
+    return () => {
+      unsubscribe?.()
     }
-  }, [autoApply, mosaicReady, photos.length, currentPhotoIndex, totalTiles])
+  }, [mosaicReady, handleNewPhoto])
 
   // Create mosaic structure when main image loads
   useEffect(() => {
     if (mainImage && mosaicRef.current) {
       createMosaicStructure()
     }
-  }, [mainImage, tileSize])
+  }, [mainImage, mosaicRef.current])
+
+  // Create mosaic grid
+  const createMosaic = useCallback(async () => {
+    if (!mainImage || !mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
+
+    const img = new Image()
+    img.src = mainImage
+
+    await new Promise((resolve) => {
+      img.onload = resolve
+    })
+
+    const aspectRatio = img.width / img.height
+    const { tileSize } = mosaicState
+    
+    // Calculate optimal grid size
+    const containerWidth = mosaicRef.current.clientWidth
+    const cols = Math.floor(containerWidth / tileSize)
+    const rows = Math.floor(cols / aspectRatio)
+    const totalTiles = cols * rows
+
+    // Generate randomized tile order
+    const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
+    for (let i = tileOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]]
+    }
+
+    // Update mosaic state
+    setMosaicState(prev => ({
+      ...prev,
+      cols,
+      rows,
+      totalTiles,
+      tileOrder,
+      currentIndex: 0
+    }))
+
+    // Create grid containers
+    const photoLayer = photoLayerRef.current
+    const whiteLayer = whiteLayerRef.current
+    
+    photoLayer.style.display = 'grid'
+    photoLayer.style.gridTemplateColumns = `repeat(${cols}, ${tileSize}px)`
+    whiteLayer.style.display = 'grid'
+    whiteLayer.style.gridTemplateColumns = `repeat(${cols}, ${tileSize}px)`
+
+    // Clear existing tiles
+    photoLayer.innerHTML = ''
+    whiteLayer.innerHTML = ''
+
+    // Create tiles efficiently
+    const photoFragment = document.createDocumentFragment()
+    const whiteFragment = document.createDocumentFragment()
+
+    for (let i = 0; i < totalTiles; i++) {
+      const photoTile = document.createElement('div')
+      photoTile.className = 'photo-tile'
+      photoTile.style.width = `${tileSize}px`
+      photoTile.style.height = `${tileSize}px`
+      photoTile.style.opacity = '0'
+      photoFragment.appendChild(photoTile)
+
+      const whiteTile = document.createElement('div')
+      whiteTile.className = 'white-tile'
+      whiteTile.style.width = `${tileSize}px`
+      whiteTile.style.height = `${tileSize}px`
+      whiteTile.style.backgroundColor = 'white'
+      whiteFragment.appendChild(whiteTile)
+    }
+
+    photoLayer.appendChild(photoFragment)
+    whiteLayer.appendChild(whiteFragment)
+    setMosaicReady(true)
+  }, [mainImage, mosaicState.tileSize])
 
   // Create the layered mosaic structure with white overlay
   const createMosaicStructure = () => {
@@ -215,24 +230,22 @@ export default function Home() {
 
     // Calculate dimensions based on a reference size
     const containerWidth = 800 // Fixed width for consistency
-    const newCols = Math.floor(containerWidth / tileSize)
-    const newRows = Math.floor((containerWidth * 0.6) / tileSize) // 4:3 aspect ratio
+    const newCols = Math.floor(containerWidth / mosaicState.tileSize)
+    const newRows = Math.floor((containerWidth * 0.6) / mosaicState.tileSize) // 4:3 aspect ratio
     const newTotalTiles = newCols * newRows
 
     console.log(`🎨 Creating mosaic: ${newCols}x${newRows} = ${newTotalTiles} tiles`)
 
-    setCols(newCols)
-    setRows(newRows)
-    setTotalTiles(newTotalTiles)
+    setMosaicState((prev) => ({ ...prev, cols: newCols, rows: newRows, totalTiles: newTotalTiles }))
 
     // Create random tile order
     const newTileOrder = Array.from({ length: newTotalTiles }, (_, i) => i)
     newTileOrder.sort(() => Math.random() - 0.5)
-    setTileOrder(newTileOrder)
+    setMosaicState((prev) => ({ ...prev, tileOrder: newTileOrder }))
 
     // Set container dimensions
-    const mosaicWidth = newCols * tileSize
-    const mosaicHeight = newRows * tileSize
+    const mosaicWidth = newCols * mosaicState.tileSize
+    const mosaicHeight = newRows * mosaicState.tileSize
 
     mosaicRef.current.style.width = `${mosaicWidth}px`
     mosaicRef.current.style.height = `${mosaicHeight}px`
@@ -244,8 +257,8 @@ export default function Home() {
     // Set up grid layouts
     const gridStyle = {
       display: "grid",
-      gridTemplateColumns: `repeat(${newCols}, ${tileSize}px)`,
-      gridTemplateRows: `repeat(${newRows}, ${tileSize}px)`,
+      gridTemplateColumns: `repeat(${newCols}, ${mosaicState.tileSize}px)`,
+      gridTemplateRows: `repeat(${newRows}, ${mosaicState.tileSize}px)`,
       position: "absolute" as const,
       inset: "0",
     }
@@ -258,8 +271,8 @@ export default function Home() {
       const photoTile = document.createElement("div")
       photoTile.className = "photo-tile"
       photoTile.style.cssText = `
-    width: ${tileSize}px;
-    height: ${tileSize}px;
+    width: ${mosaicState.tileSize}px;
+    height: ${mosaicState.tileSize}px;
     background-size: cover;
     background-position: center;
     opacity: 0;
@@ -274,8 +287,8 @@ export default function Home() {
       const whiteTile = document.createElement("div")
       whiteTile.className = "white-tile"
       whiteTile.style.cssText = `
-        width: ${tileSize}px;
-        height: ${tileSize}px;
+        width: ${mosaicState.tileSize}px;
+        height: ${mosaicState.tileSize}px;
         background-color: white;
         opacity: 1;
         transition: opacity 0.8s ease-in-out;
@@ -285,19 +298,19 @@ export default function Home() {
     }
 
     setMosaicReady(true)
-    setCurrentPhotoIndex(0)
+    setMosaicState((prev) => ({ ...prev, currentIndex: 0 }))
     console.log("✅ Mosaic structure created - white tiles covering main image")
   }
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
-    if (!mosaicReady || currentPhotoIndex >= tileOrder.length || photos.length === 0) {
+    if (!mosaicReady || mosaicState.currentIndex >= mosaicState.tileOrder.length || photos.length === 0) {
       console.log("Cannot apply photo: mosaic not ready or no tiles/photos available")
       return
     }
 
-    const photoIndex = currentPhotoIndex % photos.length
-    const tileIndex = tileOrder[currentPhotoIndex]
+    const photoIndex = mosaicState.currentIndex % photos.length
+    const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex]
     const photo = photos[photoIndex]
 
     const photoTiles = photoLayerRef.current?.children
@@ -318,374 +331,263 @@ export default function Home() {
         photoTile.style.opacity = "1"
       }, 50)
 
-      setCurrentPhotoIndex((prev) => prev + 1)
+      setMosaicState((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
     }
   }
 
   // Save mosaic to Google Drive
   const saveMosaicToGoogleDrive = async () => {
-    if (!mosaicRef.current) {
-      alert("No mosaic to save!")
+    if (!mosaicRef.current || !mosaicReady) return;
+
+    try {
+      setStatus("Preparing mosaic for save...");
+
+      // Create a canvas with the same dimensions as the mosaic
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not get canvas context");
+
+      // Set canvas size to match mosaic
+      const mosaic = mosaicRef.current;
+      canvas.width = mosaic.clientWidth;
+      canvas.height = mosaic.clientHeight;
+
+      // Draw main image
+      const mainImg = new Image();
+      await new Promise((resolve, reject) => {
+        mainImg.onload = resolve;
+        mainImg.onerror = reject;
+        mainImg.src = mainImage!;
+      });
+      ctx.drawImage(mainImg, 0, 0, canvas.width, canvas.height);
+
+      // Draw photo tiles
+      const photoTiles = photoLayerRef.current?.children;
+      if (photoTiles) {
+        const { cols, rows, tileSize } = mosaicState;
+        
+        for (let i = 0; i < photos.length; i++) {
+          const photo = photos[i];
+          if (!photo.tileIndex) continue;
+
+          const row = Math.floor(photo.tileIndex / cols);
+          const col = photo.tileIndex % cols;
+          const x = col * tileSize;
+          const y = row * tileSize;
+
+          const img = new Image();
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = photo.photoData;
+          });
+
+          // Apply soft-light blend mode
+          ctx.globalCompositeOperation = 'soft-light';
+          ctx.drawImage(img, x, y, tileSize, tileSize);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+      }
+
+      // Convert canvas to blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error("Failed to create blob"));
+          },
+          "image/jpeg",
+          0.95
+        );
+      });
+
+      // Prepare form data
+      const formData = new FormData();
+      formData.append("file", blob, `mosaic_${new Date().toISOString()}.jpg`);
+
+      setStatus("Uploading to Google Drive...");
+
+      // Upload to Google Drive
+      const response = await fetch("/api/save-mosaic", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to upload to Google Drive");
+      }
+
+      const data = await response.json();
+      setStatus("✅ Mosaic saved to Google Drive!");
+      setTimeout(() => setStatus(""), 3000);
+
+    } catch (err) {
+      console.error("Error saving mosaic:", err);
+      setStatus("❌ Failed to save mosaic");
+      setTimeout(() => setStatus(""), 5000);
+    }
+  }
+  // Reset the mosaic
+  const resetMosaic = async () => {
+    if (!confirm('Are you sure you want to reset the mosaic? This will delete all photos and the main image.')) {
       return
     }
 
-    setIsSaving(true)
-    setSaveStatus("Preparing mosaic...")
-
     try {
-      // Create a canvas to capture the mosaic
-      const canvas = document.createElement("canvas")
-      const ctx = canvas.getContext("2d")
-      if (!ctx) throw new Error("Could not create canvas context")
+      setStatus('Resetting mosaic...')
+      
+      // Clear photos
+      await fetch("/api/photos", { method: "DELETE" })
+      
+      // Clear main image
+      await fetch("/api/main-image", { method: "DELETE" })
 
-      const mosaicWidth = cols * tileSize
-      const mosaicHeight = rows * tileSize
-      canvas.width = mosaicWidth
-      canvas.height = mosaicHeight
-
-      // Draw main image as background
-      if (mainImage) {
-        const img = new Image()
-        img.crossOrigin = "anonymous"
-        await new Promise((resolve, reject) => {
-          img.onload = resolve
-          img.onerror = reject
-          img.src = mainImage
-        })
-        ctx.drawImage(img, 0, 0, mosaicWidth, mosaicHeight)
-      }
-
-      // Draw white tiles first
-      const whiteTiles = whiteLayerRef.current?.children
-      if (whiteTiles) {
-        ctx.fillStyle = "white"
-        for (let i = 0; i < whiteTiles.length; i++) {
-          const tile = whiteTiles[i] as HTMLElement
-          if (tile.style.opacity === "1") {
-            const row = Math.floor(i / cols)
-            const col = i % cols
-            const x = col * tileSize
-            const y = row * tileSize
-            ctx.fillRect(x, y, tileSize, tileSize)
-          }
-        }
-      }
-
-      // Draw photos on top with blend mode simulation
-      const photoTiles = photoLayerRef.current?.children
-      if (photoTiles) {
-        ctx.globalCompositeOperation = "soft-light"
-        for (let i = 0; i < photoTiles.length; i++) {
-          const tile = photoTiles[i] as HTMLElement
-          if (tile.style.opacity === "1" && tile.style.backgroundImage) {
-            const row = Math.floor(i / cols)
-            const col = i % cols
-            const x = col * tileSize
-            const y = row * tileSize
-
-            // Extract image URL from background-image style
-            const bgImage = tile.style.backgroundImage
-            const urlMatch = bgImage.match(/url$$["']?([^"']*)["']?$$/)
-            if (urlMatch) {
-              const photoImg = new Image()
-              photoImg.crossOrigin = "anonymous"
-              await new Promise((resolve, reject) => {
-                photoImg.onload = resolve
-                photoImg.onerror = reject
-                photoImg.src = urlMatch[1]
-              })
-              ctx.drawImage(photoImg, x, y, tileSize, tileSize)
-            }
-          }
-        }
-        ctx.globalCompositeOperation = "source-over" // Reset blend mode
-      }
-
-      const mosaicData = canvas.toDataURL("image/jpeg", 0.9)
-      setSaveStatus("Uploading to Google Drive...")
-
-      const response = await fetch("/api/save-mosaic", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ mosaicData }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(`Server error (${response.status}): ${errorData.error || response.statusText}`)
-      }
-
-      const result = await response.json()
-      console.log("✅ Mosaic saved successfully:", result)
-
-      setSaveStatus("✅ Mosaic saved to Google Drive!")
-      setTimeout(() => setSaveStatus(""), 3000)
-    } catch (error) {
-      console.error("❌ Error saving mosaic:", error)
-      const errorMessage = error instanceof Error ? error.message : "Unknown error"
-      setSaveStatus(`❌ Failed: ${errorMessage}`)
-      setTimeout(() => setSaveStatus(""), 5000)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  // Toggle auto-polling
-  const toggleAutoPolling = () => {
-    setAutoPolling(!autoPolling)
-  }
-
-  // Toggle auto-apply
-  const toggleAutoApply = () => {
-    setAutoApply(!autoApply)
-  }
-
-  // Manual refresh
-  const handleManualRefresh = () => {
-    fetchMainImage()
-    fetchCameraPhotos(true)
-  }
-
-  // Clear all photos from Camera Photos folder
-  const clearPhotos = async () => {
-    if (confirm("Clear all photos from the mosaic? This will delete camera photos from Camera Photos folder.")) {
+      // Reset state
       setPhotos([])
-      setCurrentPhotoIndex(0)
+      setMainImage(null)
+      setMosaicState({
+        cols: 0,
+        rows: 0,
+        tileSize: 50,
+        totalTiles: 0,
+        currentIndex: 0,
+        tileOrder: []
+      })
+      setMosaicReady(false)
 
-      // Reset all tiles to white
-      const photoTiles = photoLayerRef.current?.children
-      const whiteTiles = whiteLayerRef.current?.children
+      // Clear DOM
+      if (photoLayerRef.current) photoLayerRef.current.innerHTML = ''
+      if (whiteLayerRef.current) whiteLayerRef.current.innerHTML = ''
 
-      if (photoTiles && whiteTiles) {
-        for (let i = 0; i < photoTiles.length; i++) {
-          const photoTile = photoTiles[i] as HTMLElement
-          const whiteTile = whiteTiles[i] as HTMLElement
-
-          photoTile.style.opacity = "0"
-          photoTile.style.backgroundImage = ""
-          whiteTile.style.opacity = "1"
-        }
-      }
-
-      try {
-        const response = await fetch("/api/camera-photos", { method: "DELETE" })
-        if (response.ok) {
-          console.log("✅ Camera photos cleared from Camera Photos folder")
-        }
-      } catch (error) {
-        console.error("Error clearing camera photos from Camera Photos folder:", error)
-      }
+      setStatus('✅ Mosaic reset complete')
+      setTimeout(() => setStatus(''), 3000)
+    } catch (err) {
+      console.error('Error resetting mosaic:', err)
+      setStatus('❌ Failed to reset mosaic')
+      setTimeout(() => setStatus(''), 3000)
     }
   }
 
-  // Manual photo application
-  const handleApplyPhoto = () => {
-    applyNextPhoto()
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-900 p-8">
+        <Card className="max-w-4xl mx-auto">
+          <CardContent className="p-8 text-center">
+            <div className="animate-spin h-12 w-12 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+            <h2 className="text-2xl font-semibold mb-2">Loading Mosaic</h2>
+            <p className="text-gray-500">Please wait while we set up your mosaic...</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
-  const getRevealPercentage = () => {
-    if (totalTiles === 0) return 0
-    return Math.round((currentPhotoIndex / totalTiles) * 100)
-  }
-
-  return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-6">🎨 Layered Mosaic Display</h1>
-
-      {/* Error Alert */}
-      {error && (
-        <Alert className="mb-4 border-red-500 bg-red-50">
-          <AlertDescription className="text-red-700">
-            <strong>Error:</strong> {error}
-          </AlertDescription>
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-900 p-8">
+        <Alert variant="destructive" className="max-w-4xl mx-auto">
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
-      )}
-
-      {/* Save Status */}
-      {saveStatus && (
-        <div
-          className={`mb-4 p-3 rounded ${
-            saveStatus.includes("❌")
-              ? "bg-red-100 border border-red-400 text-red-700"
-              : saveStatus.includes("✅")
-                ? "bg-green-100 border border-green-400 text-green-700"
-                : "bg-blue-100 border border-blue-400 text-blue-700"
-          }`}
-        >
-          <strong>Save Status:</strong> {saveStatus}
-        </div>
-      )}
-
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-4">
-          {/* Auto-polling and auto-apply toggles */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${autoPolling ? "bg-green-500" : "bg-gray-500"}`}></div>
-              <span>Auto-check: {autoPolling ? "ON" : "OFF"}</span>
-              <Switch checked={autoPolling} onCheckedChange={toggleAutoPolling} className="ml-2" />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${autoApply ? "bg-blue-500" : "bg-gray-500"}`}></div>
-              <span>Auto-apply: {autoApply ? "ON" : "OFF"}</span>
-              <Switch checked={autoApply} onCheckedChange={toggleAutoApply} className="ml-2" />
-            </div>
-          </div>
-
-          <span>Photos: {photos.length}</span>
-          <span>
-            Applied: {currentPhotoIndex}/{totalTiles}
-          </span>
-          <span>Revealed: {getRevealPercentage()}%</span>
-
-          {/* Photo check status */}
-          <span className="text-sm text-gray-600">Status: {photoCheckStatus}</span>
-
-          {/* Controls */}
-          <div className="flex items-center gap-2">
-            <Button onClick={handleManualRefresh} variant="outline" size="sm">
-              🔄 Check Now
-            </Button>
-            <Button
-              onClick={handleApplyPhoto}
-              variant="outline"
-              size="sm"
-              disabled={!mosaicReady || photos.length === 0}
-            >
-              🖼️ Apply Photo
-            </Button>
-            <Button onClick={clearPhotos} variant="outline" size="sm">
-              🗑️ Clear Photos
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-          <Link href="/upload">
-            <Button variant="outline">Upload Main Image</Button>
-          </Link>
-          <Link href="/camera">
-            <Button>Open Camera</Button>
-          </Link>
-          <Button
-            onClick={saveMosaicToGoogleDrive}
-            disabled={isSaving || !mainImage}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            {isSaving ? "💾 Saving..." : "💾 Save Mosaic"}
-          </Button>
-        </div>
       </div>
+    )
+  }
 
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+  // No main image state
+  if (!mainImage) {
+    return (
+      <div className="min-h-screen bg-gray-900 p-8">
+        <Card className="max-w-4xl mx-auto">
+          <CardContent className="p-8 text-center">
+            <h2 className="text-3xl font-bold mb-4">Welcome to Mosaic Creator</h2>
+            <p className="text-gray-500 mb-8">Upload a main image to start creating your mosaic</p>
+            <Button asChild>
+              <Link href="/upload">Upload Main Image</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Main mosaic display
+  return (
+    <div className="min-h-screen bg-gray-900 p-8">
+      <Card className="max-w-6xl mx-auto">
+        <CardContent className="p-8">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="text-2xl font-bold mb-2">Live Mosaic Display</h1>
+              <div className="flex gap-4 text-sm text-gray-500">
+                <span>Photos: {mosaicState.currentIndex}/{mosaicState.totalTiles}</span>
+                <span>Grid: {mosaicState.cols}×{mosaicState.rows}</span>
+                <span>Tile: {mosaicState.tileSize}px</span>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <Button variant="outline" asChild>
+                <Link href="/upload">Change Image</Link>
+              </Button>
+              <Button 
+                variant="secondary" 
+                onClick={saveMosaicToGoogleDrive}
+                disabled={!mosaicReady}
+              >
+                Save to Drive
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={resetMosaic}
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-2 bg-gray-800 rounded-full mb-8 overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300 ease-out"
+              style={{
+                width: `${(mosaicState.currentIndex / mosaicState.totalTiles) * 100}%`
+              }}
+            />
+          </div>
+
+          {status && (
+            <div className="mb-4">
+              <Alert>
+                <AlertDescription>{status}</AlertDescription>
+              </Alert>
+            </div>
+          )}
+
+          {/* Mosaic display */}
           <div
-            className="h-full bg-green-500 transition-all duration-500 ease-in-out"
-            style={{ width: `${getRevealPercentage()}%` }}
-          />
-        </div>
-        <p className="text-xs text-gray-500 mt-1 text-center">Mosaic Enhancement Progress: {getRevealPercentage()}%</p>
-      </div>
-
-      <Card className="mb-4">
-        <CardContent className="p-4">
-          <div className="flex justify-center">
-            {loading ? (
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
-            ) : mainImage ? (
-              <div className="flex flex-col items-center">
-                {/* Main mosaic container */}
-                <div
-                  ref={mosaicRef}
-                  className="relative border border-gray-300"
-                  style={{
-                    backgroundImage: `url('${mainImage}')`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                    backgroundRepeat: "no-repeat",
-                  }}
-                >
-                  {/* Photo layer - with soft-light blend mode applied to the entire layer */}
-                  <div
-                    ref={photoLayerRef}
-                    className="absolute inset-0"
-                    style={{
-                      zIndex: 1,
-                      mixBlendMode: "soft-light",
-                    }}
-                  />
-
-                  {/* White overlay layer - positioned above photo layer */}
-                  <div ref={whiteLayerRef} className="absolute inset-0" style={{ zIndex: 2 }} />
-                </div>
-
-                <div className="text-xs text-gray-500 mt-2 text-center">
-                  Mosaic: {mosaicReady ? "Ready" : "Loading"} | Grid: {cols}×{rows} | Tile: {tileSize}px
-                </div>
-              </div>
-            ) : (
-              <div className="text-center p-8">
-                <p className="mb-4">No main image uploaded yet.</p>
-                <Link href="/upload">
-                  <Button>Upload Main Image</Button>
-                </Link>
-              </div>
+            ref={mosaicRef}
+            className="relative w-full aspect-video bg-gray-800 rounded-lg overflow-hidden"
+          >
+            {mainImage && (
+              <img
+                src={mainImage}
+                alt="Main"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
             )}
+            <div className="absolute inset-0">
+              <div
+                ref={photoLayerRef}
+                className="absolute inset-0 mix-blend-soft-light"
+              />
+              <div
+                ref={whiteLayerRef}
+                className="absolute inset-0"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
-
-      <div className="mb-4">
-        <label className="block text-sm font-medium mb-2">Tile Size: {tileSize}px</label>
-        <input
-          type="range"
-          min="20"
-          max="100"
-          value={tileSize}
-          onChange={(e) => setTileSize(Number.parseInt(e.target.value))}
-          className="w-full"
-        />
-      </div>
-
-      {/* Instructions */}
-      <div className="mt-8 p-4 bg-blue-50 rounded-md">
-        <h3 className="font-bold mb-2 text-blue-800">How the Layered Mosaic Works:</h3>
-        <ul className="text-sm text-blue-700 space-y-1">
-          <li>• Upload a main image first - it becomes the background</li>
-          <li>• White tiles initially cover the entire main image completely</li>
-          <li>• Camera photos replace white tiles with soft-light blend effect</li>
-          <li>• Each new photo reveals more of the enhanced main image underneath</li>
-          <li>• The soft-light blend creates a beautiful enhancement effect</li>
-          <li>• Use "Apply Photo" to manually place the next photo</li>
-          <li>• Auto-check polls Google Drive every 10 seconds for new photos</li>
-        </ul>
-      </div>
-
-      {/* Debug info */}
-      <div className="mt-4 p-4 bg-gray-100 rounded-md text-xs text-gray-600">
-        <h3 className="font-bold mb-2">Status Information</h3>
-        <div>Total Photos: {photos.length}</div>
-        <div>
-          Applied Photos: {currentPhotoIndex}/{totalTiles}
-        </div>
-        <div>Main Image: {mainImage ? "Loaded" : "Not Loaded"}</div>
-        <div>Mosaic Ready: {mosaicReady ? "Yes" : "No"}</div>
-        <div>
-          Grid Size: {cols}×{rows} = {totalTiles} tiles
-        </div>
-        <div>
-          Tile Size: {tileSize}×{tileSize}px
-        </div>
-        <div>Enhancement: {getRevealPercentage()}%</div>
-        <div>Last Photo Check: {lastPhotoCheck.toLocaleTimeString()}</div>
-        <div>Auto-check: {autoPolling ? "ON (10s)" : "OFF"}</div>
-        <div>Auto-apply: {autoApply ? "ON (1s)" : "OFF"}</div>
-        <div>Check Status: {photoCheckStatus}</div>
-      </div>
     </div>
   )
 }
