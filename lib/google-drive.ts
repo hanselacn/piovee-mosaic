@@ -1,6 +1,7 @@
 import { google } from "googleapis"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/app/api/auth/[...nextauth]/route"
+import { GoogleAuth } from "google-auth-library"
 
 // Custom error class for authentication failures
 export class AuthenticationError extends Error {
@@ -10,24 +11,24 @@ export class AuthenticationError extends Error {
   }
 }
 
-// Get system auth (uses the folder ID from environment variable)
-function getSystemAuth() {
-  // For now, we'll use a simple approach where the system uses the predefined folder
-  // In a production environment, you'd want to use a service account
-  return null // This will be handled differently in the system functions
+// Initialize Google Drive service with auth
+function getDriveService() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: process.env.GOOGLE_CLIENT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+      client_id: process.env.GOOGLE_CLIENT_ID,
+    },
+    projectId: process.env.GOOGLE_PROJECT_ID,
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  })
+
+  return google.drive({ version: "v3", auth })
 }
 
 // Create a folder in Google Drive if it doesn't exist
 export async function createFolderIfNotExists(folderName: string) {
-  const session = await getServerSession(authOptions)
-  if (!session?.accessToken) {
-    throw new AuthenticationError("No access token found")
-  }
-
-  const auth = new google.auth.OAuth2()
-  auth.setCredentials({ access_token: session.accessToken })
-
-  const drive = google.drive({ version: "v3", auth })
+  const drive = getDriveService()
 
   try {
     // Check if folder exists
@@ -58,83 +59,44 @@ export async function createFolderIfNotExists(folderName: string) {
 
     // Check if it's an authentication error
     if (error.code === 401 || error.status === 401) {
-      throw new AuthenticationError("Authentication failed - please sign in again")
+      throw new AuthenticationError("Authentication failed - please check service account configuration")
     }
 
     throw new Error(`Failed to create folder: ${error instanceof Error ? error.message : "Unknown error"}`)
   }
 }
 
-// Upload a file to Google Drive using direct HTTP request
+// Upload a file to Google Drive
 export async function uploadFile(base64Data: string, fileName: string, folderId: string) {
-  const session = await getServerSession(authOptions)
-  if (!session?.accessToken) {
-    throw new AuthenticationError("No access token found")
-  }
+  const drive = getDriveService()
 
   try {
     // Remove data URL prefix if present
     const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, "")
+    const buffer = Buffer.from(base64Content, "base64")
 
-    // Create multipart body
-    const boundary = "-------314159265358979323846"
-    const delimiter = "\r\n--" + boundary + "\r\n"
-    const close_delim = "\r\n--" + boundary + "--"
-
-    const metadata = {
+    // Create file metadata
+    const fileMetadata = {
       name: fileName,
       parents: [folderId],
     }
 
-    const multipartRequestBody =
-      delimiter +
-      "Content-Type: application/json\r\n\r\n" +
-      JSON.stringify(metadata) +
-      delimiter +
-      "Content-Type: image/jpeg\r\n" +
-      "Content-Transfer-Encoding: base64\r\n" +
-      "\r\n" +
-      base64Content +
-      close_delim
-
-    const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-      method: "POST",
-      headers: {
-        "Content-Type": `multipart/related; boundary="${boundary}"`,
-        Authorization: `Bearer ${session.accessToken}`,
+    // Upload the file
+    const response = await drive.files.create({
+      requestBody: fileMetadata,
+      media: {
+        mimeType: "image/jpeg",
+        body: buffer,
       },
-      body: multipartRequestBody,
+      fields: "id,name,mimeType,createdTime,size",
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-
-      // Check if it's an authentication error
-      if (response.status === 401) {
-        throw new AuthenticationError("Authentication failed - please sign in again")
-      }
-
-      throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`)
-    }
-
-    const result = await response.json()
-    return result.id
+    return response.data
   } catch (error: any) {
-    console.error("Error uploading file to Google Drive:", error)
+    console.error("Error uploading file:", error)
 
-    // Re-throw authentication errors as-is
-    if (error instanceof AuthenticationError) {
-      throw error
-    }
-
-    // Check if the error message contains authentication-related keywords
-    if (
-      error.message &&
-      (error.message.includes("401") ||
-        error.message.includes("Unauthorized") ||
-        error.message.includes("Invalid Credentials"))
-    ) {
-      throw new AuthenticationError("Authentication failed - please sign in again")
+    if (error.code === 401 || error.status === 401) {
+      throw new AuthenticationError("Authentication failed - please check service account configuration")
     }
 
     throw new Error(`Failed to upload file: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -229,21 +191,13 @@ export async function getFileContent(fileId: string) {
 
 // List files in a folder
 export async function listFiles(folderId: string) {
-  const session = await getServerSession(authOptions)
-  if (!session?.accessToken) {
-    throw new AuthenticationError("No access token found")
-  }
-
-  const auth = new google.auth.OAuth2()
-  auth.setCredentials({ access_token: session.accessToken })
-
-  const drive = google.drive({ version: "v3", auth })
+  const drive = getDriveService()
 
   try {
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed=false`,
-      fields: "files(id, name, webContentLink, thumbnailLink)",
-      spaces: "drive",
+      fields: "files(id,name,mimeType,createdTime,size)",
+      orderBy: "createdTime desc",
     })
 
     return response.data.files || []
@@ -251,7 +205,7 @@ export async function listFiles(folderId: string) {
     console.error("Error listing files:", error)
 
     if (error.code === 401 || error.status === 401) {
-      throw new AuthenticationError("Authentication failed - please sign in again")
+      throw new AuthenticationError("Authentication failed - please check service account configuration")
     }
 
     throw new Error(`Failed to list files: ${error instanceof Error ? error.message : "Unknown error"}`)

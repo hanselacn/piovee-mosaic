@@ -1,18 +1,24 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"
 import {
-  AuthenticationError,
-  uploadFileWithSystemAuth,
-  listFilesWithSystemAuth,
-  deleteFileWithSystemAuth,
-} from "@/lib/google-drive"
+  uploadCollagePhotoWithServiceAccount,
+  listFilesWithServiceAccount,
+  isServiceAccountConfigured,
+  clearFolderWithServiceAccount,
+} from "@/lib/google-service-account"
 
-const COLLAGE_FOLDER_NAME = "collage-photos"
+const COLLAGE_FOLDER_NAME = "Mosaic Collages"
 
-// POST - Upload a new collage photo (PUBLIC - no auth required)
+// POST - Upload a new collage photo
 export async function POST(request: NextRequest) {
   try {
+    console.log("📤 Processing collage photo upload request")
+
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
+    }
+
     const { photoData } = await request.json()
 
     if (!photoData) {
@@ -39,8 +45,10 @@ export async function POST(request: NextRequest) {
     // Generate a unique filename
     const fileName = `collage-photo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.jpg`
 
-    // Upload the photo using system authentication (no user auth required)
-    const fileId = await uploadFileWithSystemAuth(photoData, fileName, COLLAGE_FOLDER_NAME)
+    // Upload using service account
+    console.log(`📤 Uploading collage photo: ${fileName}`)
+    const fileId = await uploadCollagePhotoWithServiceAccount(photoData, fileName, COLLAGE_FOLDER_NAME)
+    console.log(`✅ Collage photo uploaded successfully: ${fileName} (${fileId})`)
 
     return NextResponse.json({
       success: true,
@@ -49,8 +57,7 @@ export async function POST(request: NextRequest) {
       message: "Collage photo uploaded successfully",
     })
   } catch (error) {
-    console.error("Error uploading collage photo:", error)
-
+    console.error("❌ Error uploading collage photo:", error)
     return NextResponse.json(
       {
         error: "Failed to upload collage photo",
@@ -61,91 +68,68 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET - Get all collage photos (requires auth)
+// GET - List collage photos
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
+    console.log("📂 Listing collage photos")
+
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    // Get photos using system authentication
-    const photos = await listFilesWithSystemAuth(COLLAGE_FOLDER_NAME)
-
-    // Get photo data for each file and sort by timestamp
-    const validPhotos = photos
-      .map((photo) => ({
-        id: photo.id,
-        name: photo.name,
-        dataUrl: photo.dataUrl,
-        timestamp: extractTimestampFromFilename(photo.name || ""),
-      }))
-      .sort((a, b) => b.timestamp - a.timestamp)
+    // List files from the collages folder
+    const files = await listFilesWithServiceAccount(COLLAGE_FOLDER_NAME)
+    console.log(`📂 Found ${files.length} collage photos`)
 
     return NextResponse.json({
-      photos: validPhotos,
-      count: validPhotos.length,
+      photos: files,
+      folderInfo: {
+        folderName: COLLAGE_FOLDER_NAME,
+        totalFiles: files.length,
+      },
     })
   } catch (error) {
-    console.error("Error getting collage photos:", error)
-
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json(
-        {
-          error: "Authentication failed",
-          message: "Your session has expired. Please sign in again.",
-          requiresAuth: true,
-        },
-        { status: 401 },
-      )
-    }
-
+    console.error("❌ Error listing collage photos:", error)
     return NextResponse.json(
-      { error: "Failed to get collage photos", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Failed to list collage photos",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }
 }
 
-// DELETE - Clear all collage photos (requires auth)
+// DELETE - Clear all collage photos
 export async function DELETE() {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized", requiresAuth: true }, { status: 401 })
+    console.log("🗑️ Clearing all collage photos")
+
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    // Delete all photos using system authentication
-    const results = await deleteFileWithSystemAuth(COLLAGE_FOLDER_NAME)
+    // Clear the collages folder
+    const result = await clearFolderWithServiceAccount(COLLAGE_FOLDER_NAME)
+    console.log(`✅ Cleared ${result.deletedCount} collage photos`)
 
     return NextResponse.json({
       success: true,
-      message: `Cleared collage photos`,
-      results,
+      deletedCount: result.deletedCount,
+      message: `Cleared ${result.deletedCount} photos from ${COLLAGE_FOLDER_NAME} folder`,
     })
   } catch (error) {
-    console.error("Error clearing collage photos:", error)
-
-    if (error instanceof AuthenticationError) {
-      return NextResponse.json(
-        {
-          error: "Authentication failed",
-          message: "Your session has expired. Please sign in again.",
-          requiresAuth: true,
-        },
-        { status: 401 },
-      )
-    }
-
+    console.error("❌ Error clearing collage photos:", error)
     return NextResponse.json(
-      { error: "Failed to clear collage photos", details: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: "Failed to clear collage photos",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 },
     )
   }
-}
-
-// Helper function to extract timestamp from filename
-function extractTimestampFromFilename(filename: string): number {
-  const match = filename.match(/collage-photo-(\d+)-/)
-  return match ? Number.parseInt(match[1]) : 0
 }

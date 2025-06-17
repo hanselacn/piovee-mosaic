@@ -1,81 +1,94 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createFolderIfNotExists, uploadFile, listFiles } from "@/lib/google-drive"
-import path from "path"
+import { 
+  uploadPhotoWithServiceAccount, 
+  listFilesWithServiceAccount, 
+  isServiceAccountConfigured, 
+  clearFolderWithServiceAccount 
+} from "@/lib/google-service-account"
 
-const FOLDER_NAME = "Mosaic App"
+const FOLDER_NAME = "Mosaic App Photos"
 const PHOTOS_PREFIX = "photo-"
 
 export async function GET() {
   try {
-    // Get or create folder ID
-    let folderId: string | undefined = process.env.GOOGLE_DRIVE_FOLDER_ID;
-    if (!folderId) {
-      const newFolderId = await createFolderIfNotExists(FOLDER_NAME);
-      if (!newFolderId) {
-        throw new Error("Failed to get or create folder");
-      }
-      folderId = newFolderId;
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    // List all files in the folder
-    const files = await listFiles(folderId);
+    // List files from folder
+    const files = await listFilesWithServiceAccount(FOLDER_NAME)
 
     // Filter to get only photos (not the main image)
-    const photos = files.filter((file) => file.name?.startsWith(PHOTOS_PREFIX));
+    const photos = files.filter((file) => file.name?.startsWith(PHOTOS_PREFIX))
 
-    return NextResponse.json({ photos });
+    return NextResponse.json({ photos })
   } catch (error) {
-    console.error("Error getting photos:", error);
-    return NextResponse.json({ error: "Failed to get photos" }, { status: 500 });
+    console.error("Error getting photos:", error)
+    return NextResponse.json({ 
+      error: "Failed to get photos",
+      details: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { imageData } = await request.json();
+    const { imageData } = await request.json()
 
     if (!imageData) {
-      return NextResponse.json({ error: "No image data provided" }, { status: 400 });
+      return NextResponse.json({ error: "No image data provided" }, { status: 400 })
     }
 
-    // Get or create folder ID
-    let folderId: string | undefined = process.env.GOOGLE_DRIVE_FOLDER_ID;
-    if (!folderId) {
-      const newFolderId = await createFolderIfNotExists(FOLDER_NAME);
-      if (!newFolderId) {
-        throw new Error("Failed to get or create folder");
-      }
-      folderId = newFolderId;
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
     // Generate a unique filename with timestamp
-    const timestamp = new Date().getTime();
-    const fileName = `${PHOTOS_PREFIX}${timestamp}.jpg`;
+    const timestamp = new Date().getTime()
+    const fileName = `${PHOTOS_PREFIX}${timestamp}.jpg`
 
     // Upload the photo
-    const file = await uploadFile(imageData, fileName, folderId);
+    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, FOLDER_NAME)
 
     return NextResponse.json({
       success: true,
-      id: file.id,
+      id: fileId,
       message: "Photo uploaded successfully",
-    });
+    })
   } catch (error) {
-    console.error("Error uploading photo:", error);
+    console.error("Error uploading photo:", error)
     return NextResponse.json(
       { error: "Failed to upload photo", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }
-    );
+    )
   }
 }
 
 export async function DELETE() {
   try {
-    // For production, you might want to implement actual file deletion from Google Drive
-    // For now, we'll just return success
-    return NextResponse.json({ success: true });
+    // Check if service account is configured
+    if (!isServiceAccountConfigured()) {
+      console.error("❌ Service account not configured")
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
+    }
+
+    // Clear the folder
+    const result = await clearFolderWithServiceAccount(FOLDER_NAME)
+
+    return NextResponse.json({ 
+      success: true,
+      deletedCount: result.deletedCount,
+      message: `Cleared ${result.deletedCount} photos from ${FOLDER_NAME}`
+    })
   } catch (error) {
-    console.error("Error deleting photos:", error);
-    return NextResponse.json({ error: "Failed to delete photos" }, { status: 500 });
+    console.error("Error deleting photos:", error)
+    return NextResponse.json({
+      error: "Failed to delete photos",
+      details: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 })
   }
 }
