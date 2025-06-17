@@ -48,126 +48,49 @@ export default function Home() {
   const photoLayerRef = useRef<HTMLDivElement>(null)
   const whiteLayerRef = useRef<HTMLDivElement>(null)
 
-  // Load main image on mount
-  useEffect(() => {
-    loadMainImage()
-  }, [])
-
-  const loadMainImage = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch("/api/main-image")
-      const data = await response.json()
-
-      if (data.mainImage?.dataUrl) {
-        setMainImage(data.mainImage.dataUrl)
-        await createMosaic()
-      }
-    } catch (err) {
-      setError("Failed to load main image")
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   // Handle new photo from Pusher
   const handleNewPhoto = useCallback(
     (photoData: PhotoData) => {
-      console.log("Handling new photo:", photoData.fileName);
-      if (!mosaicReady) {
-        console.log("Mosaic not ready, skipping photo");
-        return;
-      }
+      setPhotos((prev) => {
+        // Get current state to determine if we can add the photo
+        const currentIndex = mosaicState.currentIndex
+        const totalTiles = mosaicState.totalTiles
+        const tileOrder = mosaicState.tileOrder
 
-      const { currentIndex, tileOrder, totalTiles } = mosaicState;
-      if (currentIndex >= totalTiles) {
-        console.log("No more tiles available");
-        return;
-      }
-
-      const tileIndex = tileOrder[currentIndex];
-      console.log("Applying photo to tile:", tileIndex);
-
-      // Update photo layer
-      if (photoLayerRef.current) {
-        const tiles = photoLayerRef.current.children;
-        const tile = tiles[tileIndex] as HTMLElement;
-        if (tile) {
-          tile.style.backgroundImage = `url('${photoData.photoData}')`;
-          tile.style.opacity = "1";
-          console.log("Updated photo tile");
+        if (!mosaicReady || currentIndex >= totalTiles) {
+          console.log("Cannot add photo - mosaic not ready or no tiles available")
+          return prev
         }
-      }
 
-      // Update white layer
-      if (whiteLayerRef.current) {
-        const tiles = whiteLayerRef.current.children;
-        const tile = tiles[tileIndex] as HTMLElement;
-        if (tile) {
-          tile.style.opacity = "0";
-          tile.style.transform = "scale(0.8)";
-          console.log("Updated white tile");
-        }
-      }
+        const tileIndex = tileOrder[currentIndex]
 
-      // Update state
-      setPhotos((prev) => [...prev, { ...photoData, tileIndex }]);
-      setMosaicState((prev) => ({ ...prev, currentIndex: prev.currentIndex + 1 }));
-      console.log("State updated, new currentIndex:", currentIndex + 1);
-    },
-    [mosaicReady, mosaicState]
-  );
-
-  // Effect for Pusher setup
-  useEffect(() => {
-    if (!mosaicReady) {
-      console.log("Mosaic not ready, skipping Pusher setup");
-      return;
-    }
-
-    const pusher = getPusherClient();
-    if (!pusher) {
-      console.log("Pusher client not available");
-      return;
-    }
-
-    console.log("Setting up Pusher subscription");
-    const unsubscribe = subscribeToPusherChannel(
-      pusher,
-      "camera-channel",
-      "photo-uploaded",
-      async (data: { fileName: string }) => {
-        try {
-          console.log("Received photo notification:", data.fileName);
-          setStatus("Downloading new photo...");
-          
-          const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`);
-          if (!res.ok) throw new Error("Failed to fetch photo");
-          
-          const json = await res.json();
-          console.log("Received photo data:", json.photos?.[0]?.fileName);
-          
-          if (json.photos?.[0]?.photoData) {
-            handleNewPhoto(json.photos[0]);
-            setStatus("✅ Photo added to mosaic");
-            setTimeout(() => setStatus(""), 3000);
-          } else {
-            throw new Error("No photo data received");
+        // Update photo layer
+        if (photoLayerRef.current) {
+          const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
+          if (tile) {
+            tile.style.backgroundImage = `url('${photoData.photoData}')`
+            tile.style.opacity = "1"
           }
-        } catch (err) {
-          console.error("Error fetching photo:", err);
-          setStatus("❌ Failed to add photo");
-          setTimeout(() => setStatus(""), 3000);
         }
-      }
-    );
 
-    return () => {
-      console.log("Cleaning up Pusher subscription");
-      unsubscribe?.();
-    };
-  }, [mosaicReady, handleNewPhoto])
+        // Update white layer
+        if (whiteLayerRef.current) {
+          const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
+          if (tile) {
+            tile.style.opacity = "0"
+            tile.style.transform = "scale(0.8)"
+          }
+        }
+
+        // Update mosaic state
+        setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
+
+        // Return updated photos array
+        return [...prev, { ...photoData, tileIndex }]
+      })
+    },
+    [mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder]
+  )
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
@@ -206,43 +129,141 @@ export default function Home() {
       currentIndex: 0
     }))
 
-    // Create grid containers
-    const photoLayer = photoLayerRef.current
-    const whiteLayer = whiteLayerRef.current
-    
-    photoLayer.style.display = 'grid'
-    photoLayer.style.gridTemplateColumns = `repeat(${cols}, ${tileSize}px)`
-    whiteLayer.style.display = 'grid'
-    whiteLayer.style.gridTemplateColumns = `repeat(${cols}, ${tileSize}px)`
-
-    // Clear existing tiles
-    photoLayer.innerHTML = ''
-    whiteLayer.innerHTML = ''
-
-    // Create tiles efficiently
+    // Create photo layer tiles
     const photoFragment = document.createDocumentFragment()
-    const whiteFragment = document.createDocumentFragment()
-
     for (let i = 0; i < totalTiles; i++) {
-      const photoTile = document.createElement('div')
-      photoTile.className = 'photo-tile'
-      photoTile.style.width = `${tileSize}px`
-      photoTile.style.height = `${tileSize}px`
-      photoTile.style.opacity = '0'
-      photoFragment.appendChild(photoTile)
-
-      const whiteTile = document.createElement('div')
-      whiteTile.className = 'white-tile'
-      whiteTile.style.width = `${tileSize}px`
-      whiteTile.style.height = `${tileSize}px`
-      whiteTile.style.backgroundColor = 'white'
-      whiteFragment.appendChild(whiteTile)
+      const tile = document.createElement('div')
+      tile.className = 'absolute bg-cover bg-center transition-all duration-500'
+      tile.style.width = `${tileSize}px`
+      tile.style.height = `${tileSize}px`
+      tile.style.left = `${(i % cols) * tileSize}px`
+      tile.style.top = `${Math.floor(i / cols) * tileSize}px`
+      tile.style.opacity = '0'
+      photoFragment.appendChild(tile)
     }
+    photoLayerRef.current.innerHTML = ''
+    photoLayerRef.current.appendChild(photoFragment)
 
-    photoLayer.appendChild(photoFragment)
-    whiteLayer.appendChild(whiteFragment)
+    // Create white layer tiles
+    const whiteFragment = document.createDocumentFragment()
+    for (let i = 0; i < totalTiles; i++) {
+      const tile = document.createElement('div')
+      tile.className = 'absolute bg-white transition-all duration-500'
+      tile.style.width = `${tileSize}px`
+      tile.style.height = `${tileSize}px`
+      tile.style.left = `${(i % cols) * tileSize}px`
+      tile.style.top = `${Math.floor(i / cols) * tileSize}px`
+      whiteFragment.appendChild(tile)
+    }
+    whiteLayerRef.current.innerHTML = ''
+    whiteLayerRef.current.appendChild(whiteFragment)
+
+    // Set mosaic ready state
     setMosaicReady(true)
   }, [mainImage, mosaicState.tileSize])
+
+  // Load main image
+  const loadMainImage = async () => {
+    try {
+      setLoading(true)
+      const response = await fetch("/api/main-image")
+      const data = await response.json()
+
+      if (data.mainImage?.dataUrl) {
+        setMainImage(data.mainImage.dataUrl)
+      }
+    } catch (err) {
+      setError("Failed to load main image")
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Effect: Load main image on mount
+  useEffect(() => {
+    loadMainImage()
+  }, [])
+
+  // Effect: Create mosaic when main image is loaded
+  useEffect(() => {
+    if (mainImage && mosaicRef.current) {
+      console.log("Creating mosaic from main image")
+      createMosaic()
+    }
+  }, [mainImage, createMosaic])
+
+  // Effect: Set up Pusher subscription
+  useEffect(() => {
+    if (!mosaicReady) {
+      console.log("Mosaic not ready, skipping Pusher setup")
+      return
+    }
+
+    const pusher = getPusherClient()
+    if (!pusher) {
+      console.error("Pusher client not available")
+      return
+    }
+
+    console.log("Setting up Pusher subscription")
+    let retryCount = 0
+    const maxRetries = 3
+
+    const setupSubscription = () => {
+      try {
+        const unsubscribe = subscribeToPusherChannel(
+          pusher,
+          "camera-channel",
+          "photo-uploaded",
+          async (data: { fileName: string }) => {
+            try {
+              console.log("Received photo notification:", data.fileName)
+              setStatus("Downloading new photo...")
+              
+              const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`)
+              if (!res.ok) throw new Error("Failed to fetch photo")
+              
+              const json = await res.json()
+              console.log("Received photo data:", json.photos?.[0]?.fileName)
+              
+              if (json.photos?.[0]?.photoData) {
+                handleNewPhoto(json.photos[0])
+                setStatus("✅ Photo added to mosaic")
+                setTimeout(() => setStatus(""), 3000)
+              } else {
+                throw new Error("No photo data received")
+              }
+            } catch (err) {
+              console.error("Error fetching photo:", err)
+              setStatus("❌ Failed to add photo")
+              setTimeout(() => setStatus(""), 3000)
+
+              // Retry subscription on error if we haven't exceeded max retries
+              if (retryCount < maxRetries) {
+                retryCount++
+                console.log(`Retrying Pusher subscription (attempt ${retryCount})`)
+                unsubscribe?.()
+                setupSubscription()
+              }
+            }
+          }
+        )
+
+        return unsubscribe
+      } catch (error) {
+        console.error("Error setting up Pusher subscription:", error)
+        return undefined
+      }
+    }
+
+    const unsubscribe = setupSubscription()
+
+    return () => {
+      console.log("Cleaning up Pusher subscription")
+      unsubscribe?.()
+    }
+  }, [mosaicReady, handleNewPhoto])
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
