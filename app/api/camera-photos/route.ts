@@ -6,8 +6,6 @@ import {
   clearFolderWithServiceAccount,
 } from "@/lib/google-service-account"
 
-// Use Camera Photos folder ID from environment variables
-const CAMERA_PHOTOS_FOLDER_NAME = "Camera Photos"
 
 export async function GET(req: Request) {
   try {
@@ -20,7 +18,7 @@ export async function GET(req: Request) {
     }
 
     // Get files from the Camera Photos folder
-    const files = await listFilesWithServiceAccount(CAMERA_PHOTOS_FOLDER_NAME)
+    const files = await listFilesWithServiceAccount(process.env.GOOGLE_DRIVE_CAM_PHOTO_ID!)
     console.log(`📷 Found ${files.length} files in Camera Photos folder`)
 
     if (files.length === 0) {
@@ -51,7 +49,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       photos,
       folderInfo: {
-        folderName: CAMERA_PHOTOS_FOLDER_NAME,
+        folderId: process.env.GOOGLE_DRIVE_CAM_PHOTO_ID!,
         totalFiles: files.length,
       },
     })
@@ -78,7 +76,7 @@ export async function DELETE() {
     }
 
     // Clear the Camera Photos folder
-    const result = await clearFolderWithServiceAccount(CAMERA_PHOTOS_FOLDER_NAME)
+    const result = await clearFolderWithServiceAccount(process.env.GOOGLE_DRIVE_CAM_PHOTO_ID!)
     console.log(`✅ Cleared ${result.deletedCount} camera photos`)
 
     return NextResponse.json({

@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const fileId = await uploadPhotoWithServiceAccount(
       buffer.toString("base64"),
       file.name,
-      "Mosaics" // Folder name
+      process.env.GOOGLE_DRIVE_MOSAIC_FOLDER_ID!
     );
 
     return NextResponse.json({

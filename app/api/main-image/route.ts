@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     console.log("🗑️ Clearing existing main images...")
 
     // Get existing files and delete main images
-    const existingFiles = await listFilesWithServiceAccount("Mosaic Camera Photos")
+    const existingFiles = await listFilesWithServiceAccount(process.env.GOOGLE_DRIVE_FOLDER_ID!)
     const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
 
     for (const file of mainImageFiles) {
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     console.log(`📤 Uploading main image: ${fileName}`)
 
     // Upload using service account
-    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, "Mosaic Camera Photos")
+    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, process.env.GOOGLE_DRIVE_FOLDER_ID!)
 
     console.log(`✅ Main image uploaded successfully: ${fileId}`)
 
@@ -83,7 +83,7 @@ export async function GET() {
     }
 
     // List files to find the most recent main image
-    const files = await listFilesWithServiceAccount("Mosaic Camera Photos")
+    const files = await listFilesWithServiceAccount(process.env.GOOGLE_DRIVE_FOLDER_ID!)
     const mainImage = files.find((file) => file.name?.startsWith("main-image-"))
 
     if (!mainImage || !mainImage.id) {

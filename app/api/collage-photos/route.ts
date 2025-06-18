@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import {
-  uploadCollagePhotoWithServiceAccount,
   listFilesWithServiceAccount,
   isServiceAccountConfigured,
   clearFolderWithServiceAccount,
+  uploadPhotoWithServiceAccount,
 } from "@/lib/google-service-account"
 
 const COLLAGE_FOLDER_NAME = "Mosaic Collages"
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     // Upload using service account
     console.log(`📤 Uploading collage photo: ${fileName}`)
-    const fileId = await uploadCollagePhotoWithServiceAccount(photoData, fileName, COLLAGE_FOLDER_NAME)
+    const fileId = await uploadPhotoWithServiceAccount(photoData, fileName, process.env.GOOGLE_DRIVE_MOSAIC_PHOTO_ID!)
     console.log(`✅ Collage photo uploaded successfully: ${fileName} (${fileId})`)
 
     return NextResponse.json({

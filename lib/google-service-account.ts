@@ -1,6 +1,5 @@
 import { google } from "googleapis"
 import { Readable } from "stream"
-import { GoogleAuth } from "google-auth-library"
 import { drive_v3 } from "googleapis"
 
 // Type for file metadata response
@@ -78,16 +77,13 @@ export async function findOrCreateFolder(folderName: string): Promise<string> {
 export async function uploadPhotoWithServiceAccount(
   base64Data: string,
   fileName: string,
-  folderName = "Mosaic Camera Photos",
+  folderId: string,
 ): Promise<string> {
   const drive = getDriveService()
 
   console.log(`📤 Uploading photo: ${fileName}`)
 
   try {
-    // Get or create folder
-    const folderId = process.env.GOOGLE_DRIVE_CAM_PHOTO_ID || (await findOrCreateFolder(folderName))
-
     // Convert base64 to buffer
     const base64Content = base64Data.replace(/^data:image\/[a-z]+;base64,/, "")
     const buffer = Buffer.from(base64Content, "base64")
@@ -121,63 +117,13 @@ export async function uploadPhotoWithServiceAccount(
   }
 }
 
-// Upload a collage photo to Google Drive
-export async function uploadCollagePhotoWithServiceAccount(
-  base64Data: string,
-  fileName: string,
-  folderName = "Mosaic Collages",
-): Promise<string> {
-  const drive = getDriveService()
-
-  console.log(`📤 Uploading collage: ${fileName}`)
-
-  try {
-    // Get or create folder
-    const folderId = await findOrCreateFolder(folderName)
-
-    // Convert base64 to buffer
-    const base64Content = base64Data.replace(/^data:image\/[a-z]+;base64,/, "")
-    const buffer = Buffer.from(base64Content, "base64")
-
-    // Create readable stream from buffer
-    const stream = new Readable({
-      read() {
-        this.push(buffer)
-        this.push(null)
-      },
-    })
-
-    // Upload file
-    const response = await drive.files.create({
-      requestBody: {
-        name: fileName,
-        parents: [folderId],
-      },
-      media: {
-        mimeType: "image/jpeg",
-        body: stream,
-      },
-      fields: "id, name, createdTime",
-    })
-
-    console.log(`✅ Collage uploaded: ${fileName} (${response.data.id})`)
-    return response.data.id!
-  } catch (error) {
-    console.error(`❌ Error uploading collage:`, error)
-    throw error
-  }
-}
-
 // List files in a Google Drive folder
-export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Photos"): Promise<GoogleDriveFile[]> {
+export async function listFilesWithServiceAccount(folderId: string): Promise<GoogleDriveFile[]> {
   const drive = getDriveService()
 
-  console.log(`📂 Listing files in folder: ${folderName}`)
+  console.log(`📂 Listing files in folder: ${folderId}`)
 
   try {
-    // Get folder ID
-    const folderId = process.env.GOOGLE_DRIVE_CAM_PHOTO_ID || (await findOrCreateFolder(folderName))
-
     // List files in folder
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed=false and mimeType contains 'image/'`,
@@ -186,7 +132,7 @@ export async function listFilesWithServiceAccount(folderName = "Mosaic Camera Ph
     })
 
     const files = response.data.files || []
-    console.log(`📂 Found ${files.length} files in ${folderName}`)
+    console.log(`📂 Found ${files.length} files in ${folderId}`)
 
     return files as GoogleDriveFile[]
   } catch (error) {
@@ -225,16 +171,16 @@ export async function getFileContentWithServiceAccount(fileId: string): Promise<
 }
 
 // Clear all files in a folder
-export async function clearFolderWithServiceAccount(folderName = "Mosaic Camera Photos"): Promise<{
+export async function clearFolderWithServiceAccount(folderId: string): Promise<{
   deletedCount: number
 }> {
   const drive = getDriveService()
 
-  console.log(`🗑️ Clearing folder: ${folderName}`)
+  console.log(`🗑️ Clearing folder: ${folderId}`)
 
   try {
     // Get all files in folder
-    const files = await listFilesWithServiceAccount(folderName)
+    const files = await listFilesWithServiceAccount(folderId)
     let deletedCount = 0
 
     // Delete each file
@@ -250,7 +196,7 @@ export async function clearFolderWithServiceAccount(folderName = "Mosaic Camera 
       }
     }
 
-    console.log(`✅ Deleted ${deletedCount} files from ${folderName}`)
+    console.log(`✅ Deleted ${deletedCount} files from ${folderId}`)
     return { deletedCount }
   } catch (error) {
     console.error(`❌ Error clearing folder:`, error)

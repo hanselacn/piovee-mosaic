@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { isServiceAccountConfigured, uploadCollagePhotoWithServiceAccount } from "@/lib/google-service-account"
+import { isServiceAccountConfigured, uploadPhotoWithServiceAccount } from "@/lib/google-service-account"
 import { triggerPusherEvent } from "@/lib/pusher-server"
 
 export async function POST(request: NextRequest) {
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     console.log(`📷 Uploading camera photo: ${fileName}`)
 
     // Upload to the "Camera Photos" folder using service account
-    const fileId = await uploadCollagePhotoWithServiceAccount(photoData, fileName, "Camera Photos")
+    const fileId = await uploadPhotoWithServiceAccount(photoData, fileName, process.env.GOOGLE_DRIVE_CAM_PHOTO_ID!)
 
     console.log(`✅ Camera photo uploaded successfully: ${fileName} (${fileId})`)
 
