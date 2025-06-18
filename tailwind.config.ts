@@ -10,9 +10,23 @@ const config: Config = {
   ],
   theme: {
   	extend: {
+  		fontFamily: {
+  			cormorant: ["var(--font-cormorant)"],
+  			"dm-sans": ["var(--font-dm-sans)"]
+  		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
+  			warm: {
+  				50: '#fefaf7',
+  				100: '#f1e8e2',
+  				200: '#e6d5ce',
+  				300: '#e9e0dc',
+  				400: '#b4a6a0',
+  				500: '#a0918a',
+  				600: '#7a645f',
+  				700: '#5e4b44'
+  			},
   			card: {
   				DEFAULT: 'hsl(var(--card))',
   				foreground: 'hsl(var(--card-foreground))'
