@@ -106,21 +106,14 @@ export default function Home() {
     const aspectRatio = img.width / img.height
     const { tileSize } = mosaicState
     
-    // Calculate optimal grid size
+    // Calculate grid size based on container and ensure it's not smaller than image
     const containerWidth = mosaicRef.current.clientWidth
-    const containerHeight = containerWidth / aspectRatio
-
-    // Calculate columns and rows to cover the entire image
-    // We add 1 to ensure we have enough tiles to cover any rounding
-    const cols = Math.ceil(containerWidth / tileSize)
-    const rows = Math.ceil(containerHeight / tileSize)
-
-    // Calculate adjusted tile size to perfectly fit the container
-    const adjustedTileSize = Math.min(
-      containerWidth / cols,
-      containerHeight / rows
-    )
-
+    // Calculate minimum required columns and rows
+    const minCols = Math.ceil(img.width / tileSize)
+    const minRows = Math.ceil(img.height / tileSize)
+    // Calculate actual columns based on container width, but not less than minimum
+    const cols = Math.max(Math.floor(containerWidth / tileSize), minCols)
+    const rows = Math.max(Math.floor(cols / aspectRatio), minRows)
     const totalTiles = cols * rows
 
     // Generate randomized tile order
@@ -130,30 +123,25 @@ export default function Home() {
       [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]]
     }
 
-    // Update mosaic state with adjusted sizes
+    // Update mosaic state
     setMosaicState(prev => ({
       ...prev,
       cols,
       rows,
-      tileSize: adjustedTileSize,
       totalTiles,
       tileOrder,
       currentIndex: 0
     }))
-
-    // Set container dimensions
-    mosaicRef.current.style.width = `${containerWidth}px`
-    mosaicRef.current.style.height = `${containerHeight}px`
 
     // Create photo layer tiles
     const photoFragment = document.createDocumentFragment()
     for (let i = 0; i < totalTiles; i++) {
       const tile = document.createElement('div')
       tile.className = 'absolute bg-cover bg-center transition-all duration-500'
-      tile.style.width = `${adjustedTileSize}px`
-      tile.style.height = `${adjustedTileSize}px`
-      tile.style.left = `${(i % cols) * adjustedTileSize}px`
-      tile.style.top = `${Math.floor(i / cols) * adjustedTileSize}px`
+      tile.style.width = `${tileSize}px`
+      tile.style.height = `${tileSize}px`
+      tile.style.left = `${(i % cols) * tileSize}px`
+      tile.style.top = `${Math.floor(i / cols) * tileSize}px`
       tile.style.opacity = '0'
       photoFragment.appendChild(tile)
     }
@@ -165,10 +153,10 @@ export default function Home() {
     for (let i = 0; i < totalTiles; i++) {
       const tile = document.createElement('div')
       tile.className = 'absolute bg-white transition-all duration-500'
-      tile.style.width = `${adjustedTileSize}px`
-      tile.style.height = `${adjustedTileSize}px`
-      tile.style.left = `${(i % cols) * adjustedTileSize}px`
-      tile.style.top = `${Math.floor(i / cols) * adjustedTileSize}px`
+      tile.style.width = `${tileSize}px`
+      tile.style.height = `${tileSize}px`
+      tile.style.left = `${(i % cols) * tileSize}px`
+      tile.style.top = `${Math.floor(i / cols) * tileSize}px`
       whiteFragment.appendChild(tile)
     }
     whiteLayerRef.current.innerHTML = ''
