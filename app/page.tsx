@@ -36,7 +36,7 @@ export default function Home() {
   const [mosaicState, setMosaicState] = useState<MosaicState>({
     cols: 0,
     rows: 0,
-    tileSize: 50,
+    tileSize: 100, // Increased from 50 to 100
     totalTiles: 0,
     currentIndex: 0,
     tileOrder: [],

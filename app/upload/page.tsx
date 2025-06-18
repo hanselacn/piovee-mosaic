@@ -1,12 +1,17 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
+
+interface GridPreview {
+  cols: number
+  rows: number
+  tileSize: number
+}
 
 export default function UploadPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
@@ -14,6 +19,24 @@ export default function UploadPage() {
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [error, setError] = useState<string>("")
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
+  const [gridPreview, setGridPreview] = useState<GridPreview | null>(null)
+  const tileSize = 100 // Match the tile size from main page
+
+  // Calculate grid preview when image is selected
+  useEffect(() => {
+    if (selectedImage && previewRef.current) {
+      const img = new Image()
+      img.src = selectedImage
+      img.onload = () => {
+        const aspectRatio = img.width / img.height
+        const containerWidth = previewRef.current?.clientWidth || 800
+        const cols = Math.floor(containerWidth / tileSize)
+        const rows = Math.floor(cols / aspectRatio)
+        setGridPreview({ cols, rows, tileSize })
+      }
+    }
+  }, [selectedImage])
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,20 +143,58 @@ export default function UploadPage() {
       <Card className="mb-4">
         <CardContent className="p-4">
           <div
-            className="border-2 border-dashed border-gray-300 rounded-md p-6 text-center cursor-pointer"
+            ref={previewRef}
+            className="relative border-2 border-dashed border-gray-300 rounded-md p-6 text-center cursor-pointer overflow-hidden"
             onClick={() => fileInputRef.current?.click()}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
           >
             {selectedImage ? (
-              <img src={selectedImage || "/placeholder.svg"} alt="Selected" className="max-h-96 mx-auto" />
+              <div className="relative">
+                <img
+                  src={selectedImage}
+                  alt="Selected"
+                  className="max-h-96 mx-auto relative z-10"
+                />
+                {gridPreview && (
+                  <div className="absolute inset-0 z-20">
+                    <div
+                      className="grid"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${gridPreview.cols}, ${gridPreview.tileSize}px)`,
+                        gridTemplateRows: `repeat(${gridPreview.rows}, ${gridPreview.tileSize}px)`,
+                      }}
+                    >
+                      {Array.from({ length: gridPreview.cols * gridPreview.rows }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="border border-white/20 transition-opacity duration-300 hover:bg-white/10"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="py-12">
                 <p className="text-gray-500">Click or drag and drop an image here</p>
               </div>
             )}
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*"
+              className="hidden"
+            />
           </div>
+          {gridPreview && selectedImage && (
+            <div className="mt-4 text-sm text-gray-500 text-center">
+              Grid Preview: {gridPreview.cols} × {gridPreview.rows} tiles (
+              {gridPreview.tileSize}px each)
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -155,9 +216,10 @@ export default function UploadPage() {
         <h3 className="font-bold mb-2 text-blue-800">Upload Instructions:</h3>
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Select or drag and drop an image file</li>
+          <li>• White grid overlay shows how your image will be divided into tiles</li>
+          <li>• Each tile will be replaced with a camera photo in the mosaic</li>
           <li>• The image will be uploaded to Google Drive using the service account</li>
           <li>• No sign-in required - uses automatic authentication</li>
-          <li>• Return to the mosaic page to see your uploaded image</li>
           <li>• Camera photos will enhance your main image with the soft-light effect</li>
         </ul>
       </div>
