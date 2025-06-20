@@ -38,10 +38,10 @@ export default function Home() {
     rows: 0,
     tileSize: 30, // Reduced from 100 to 30 for more detailed mosaic
     totalTiles: 0,
-    currentIndex: 0,
-    tileOrder: [],
+    currentIndex: 0,    tileOrder: [],
   })
   const [mosaicReady, setMosaicReady] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
 
   // Refs for DOM elements
   const mosaicRef = useRef<HTMLDivElement>(null)
@@ -69,18 +69,19 @@ export default function Home() {
   // On Pusher event, fetch photos again
   const handleNewPhoto = useCallback(() => {
     fetchPhotos();
-  }, [fetchPhotos]);
-  // Process photo queue efficiently: take one photo, collage it, mark as used, repeat
+  }, [fetchPhotos]);  // Process photo queue efficiently: take one photo, collage it, mark as used, repeat
   useEffect(() => {
     if (!mosaicReady) return;
     if (photos.length === 0) return;
     if (mosaicState.currentIndex >= mosaicState.totalTiles) return;
+    if (isProcessing) return; // Prevent processing if already processing
 
     // Take the first unused photo from the queue
     const nextPhoto = photos[0];
     if (!nextPhoto) return;
 
     console.log(`Processing photo ${nextPhoto.id} (${photos.length} photos in queue)`);
+    setIsProcessing(true);
 
     const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex];
     
@@ -113,11 +114,13 @@ export default function Home() {
       console.log(`Photo ${nextPhoto.id} marked as used, removing from local queue`);
       // Remove photo from local state to trigger next photo processing
       setPhotos(prev => prev.slice(1));
+      setIsProcessing(false); // Allow next photo to be processed
     }).catch(err => {
       console.error('Failed to mark photo as used:', err);
+      setIsProcessing(false); // Allow retry
     });
 
-  }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder])
+  }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder, isProcessing])
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
