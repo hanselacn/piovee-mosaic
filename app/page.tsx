@@ -47,14 +47,16 @@ export default function Home() {
   const mosaicRef = useRef<HTMLDivElement>(null)
   const photoLayerRef = useRef<HTMLDivElement>(null)
   const whiteLayerRef = useRef<HTMLDivElement>(null)
-
   // Fetch all unused photos from Firestore
   const fetchPhotos = useCallback(async () => {
     try {
+      console.log('Fetching unused photos from Firestore...');
       const res = await fetch('/api/mosaic-photos?used=false');
       const data = await res.json();
+      console.log(`Fetched ${data.photos?.length || 0} unused photos:`, data.photos?.map((p: any) => p.id));
       setPhotos(data.photos || []);
     } catch (err) {
+      console.error('Error fetching photos:', err);
       setError('Failed to fetch photos from Firestore');
     }
   }, []);
@@ -68,7 +70,6 @@ export default function Home() {
   const handleNewPhoto = useCallback(() => {
     fetchPhotos();
   }, [fetchPhotos]);
-
   // Process photo queue efficiently: take one photo, collage it, mark as used, repeat
   useEffect(() => {
     if (!mosaicReady) return;
@@ -78,6 +79,8 @@ export default function Home() {
     // Take the first unused photo from the queue
     const nextPhoto = photos[0];
     if (!nextPhoto) return;
+
+    console.log(`Processing photo ${nextPhoto.id} (${photos.length} photos in queue)`);
 
     const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex];
     
@@ -101,11 +104,13 @@ export default function Home() {
     setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }));
 
     // Mark photo as used in Firestore (remove from queue)
+    console.log(`Marking photo ${nextPhoto.id} as used...`);
     fetch('/api/mosaic-photos', {
       method: 'PATCH',
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: nextPhoto.id }),
     }).then(() => {
+      console.log(`Photo ${nextPhoto.id} marked as used, removing from local queue`);
       // Remove photo from local state to trigger next photo processing
       setPhotos(prev => prev.slice(1));
     }).catch(err => {

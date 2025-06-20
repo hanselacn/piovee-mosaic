@@ -43,11 +43,13 @@ export default function CameraPage() {
 
     ctx.filter = filter
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
-
+    
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
     setPhotos((prev) => [...prev, dataUrl])
 
     try {
+      console.log(`Uploading photo ${photoCount + 1} to Firestore...`);
+      
       // 1. Upload photo to Firestore queue
       const firestoreRes = await fetch("/api/mosaic-photos", {
         method: "POST",
@@ -60,6 +62,8 @@ export default function CameraPage() {
       });
       if (!firestoreRes.ok) throw new Error("Failed to upload photo to Firestore queue");
 
+      console.log("Photo uploaded to Firestore, triggering Pusher event...");
+      
       // 2. Trigger Pusher event to notify main page
       await fetch("/api/test-pusher", { method: "POST" });
       
