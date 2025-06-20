@@ -49,48 +49,42 @@ export default function Home() {
   const whiteLayerRef = useRef<HTMLDivElement>(null)
 
   // Handle new photo from Pusher
-  const handleNewPhoto = useCallback(
-    (photoData: PhotoData) => {
-      setPhotos((prev) => {
-        // Get current state to determine if we can add the photo
-        const currentIndex = mosaicState.currentIndex
-        const totalTiles = mosaicState.totalTiles
-        const tileOrder = mosaicState.tileOrder
+  const handleNewPhoto = useCallback((photoData: PhotoData) => {
+    setMosaicState(prevMosaicState => {
+      if (!mosaicReady || prevMosaicState.currentIndex >= prevMosaicState.totalTiles) {
+        console.log("Cannot add photo - mosaic not ready or no tiles available")
+        return prevMosaicState
+      }
+      const tileIndex = prevMosaicState.tileOrder[prevMosaicState.currentIndex]
 
-        if (!mosaicReady || currentIndex >= totalTiles) {
-          console.log("Cannot add photo - mosaic not ready or no tiles available")
-          return prev
+      // Update photo layer
+      if (photoLayerRef.current) {
+        const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
+        if (tile) {
+          tile.style.backgroundImage = `url('${photoData.photoData}')`
+          tile.style.opacity = "1"
         }
+      }
 
-        const tileIndex = tileOrder[currentIndex]
-
-        // Update photo layer
-        if (photoLayerRef.current) {
-          const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
-          if (tile) {
-            tile.style.backgroundImage = `url('${photoData.photoData}')`
-            tile.style.opacity = "1"
-          }
+      // Update white layer
+      if (whiteLayerRef.current) {
+        const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
+        if (tile) {
+          tile.style.opacity = "0"
+          tile.style.transform = "scale(0.8)"
         }
+      }
 
-        // Update white layer
-        if (whiteLayerRef.current) {
-          const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
-          if (tile) {
-            tile.style.opacity = "0"
-            tile.style.transform = "scale(0.8)"
-          }
-        }
+      // Add photo with tileIndex to photos array
+      setPhotos(prevPhotos => [
+        ...prevPhotos,
+        { ...photoData, tileIndex }
+      ])
 
-        // Update mosaic state
-        setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
-
-        // Return updated photos array
-        return [...prev, { ...photoData, tileIndex }]
-      })
-    },
-    [mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder]
-  )
+      // Increment currentIndex
+      return { ...prevMosaicState, currentIndex: prevMosaicState.currentIndex + 1 }
+    })
+  }, [mosaicReady])
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
@@ -269,42 +263,38 @@ export default function Home() {
     }
   }, [mosaicReady, handleNewPhoto])
 
-  // Calculate grid dimensions based on main image
+  // Calculate grid dimensions based on displayed mosaic container size
   useEffect(() => {
-    if (!mainImage) return;
+    if (!mainImage || !mosaicRef.current) return;
 
-    const img = new Image();
-    img.src = mainImage;
-    img.onload = () => {
-      const { width, height } = img;
-      const aspectRatio = width / height;
-      
-      // Calculate grid dimensions to maintain image aspect ratio
-      let cols = Math.floor(width / mosaicState.tileSize);
-      let rows = Math.floor(height / mosaicState.tileSize);
-      
-      // Ensure minimum number of tiles for good mosaic effect
-      const minTiles = 200; // Minimum number of tiles for good mosaic effect
-      if (cols * rows < minTiles) {
-        // Scale up grid while maintaining aspect ratio
-        const scale = Math.sqrt(minTiles / (cols * rows));
-        cols = Math.floor(cols * scale);
-        rows = Math.floor(rows * scale);
-      }
+    const containerWidth = mosaicRef.current.clientWidth;
+    const containerHeight = mosaicRef.current.clientHeight;
+    const aspectRatio = containerWidth / containerHeight;
+    const tileSize = mosaicState.tileSize;
 
-      const totalTiles = cols * rows;
-      const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
-        .sort(() => Math.random() - 0.5); // Randomize tile order for dynamic effect
+    let cols = Math.floor(containerWidth / tileSize);
+    let rows = Math.floor(containerHeight / tileSize);
 
-      setMosaicState(prev => ({
-        ...prev,
-        cols,
-        rows,
-        totalTiles,
-        tileOrder,
-        currentIndex: 0,
-      }));
-    };
+    // Ensure minimum number of tiles for good mosaic effect
+    const minTiles = 200;
+    if (cols * rows < minTiles) {
+      const scale = Math.sqrt(minTiles / (cols * rows));
+      cols = Math.floor(cols * scale);
+      rows = Math.floor(rows * scale);
+    }
+
+    const totalTiles = cols * rows;
+    const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
+      .sort(() => Math.random() - 0.5);
+
+    setMosaicState(prev => ({
+      ...prev,
+      cols,
+      rows,
+      totalTiles,
+      tileOrder,
+      currentIndex: 0,
+    }));
   }, [mainImage, mosaicState.tileSize]);
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
