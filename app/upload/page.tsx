@@ -21,13 +21,11 @@ export default function UploadPage() {
   const [error, setError] = useState<string>("")
   const [tileSize, setTileSize] = useState(20)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const previewRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [gridPreview, setGridPreview] = useState<GridPreview | null>(null)
-
   // Calculate grid preview when image is selected or tile size changes
   useEffect(() => {
-    if (selectedImage && previewRef.current) {
+    if (selectedImage) {
       const img = new Image()
       img.src = selectedImage
       img.onload = () => {
