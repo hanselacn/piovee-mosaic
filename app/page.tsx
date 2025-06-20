@@ -48,15 +48,26 @@ export default function Home() {
   const photoLayerRef = useRef<HTMLDivElement>(null)
   const whiteLayerRef = useRef<HTMLDivElement>(null)
 
-  // Handle new photo from Pusher
-  const handleNewPhoto = useCallback((photoData: PhotoData) => {
-    setMosaicState(prevMosaicState => {
-      if (!mosaicReady || prevMosaicState.currentIndex >= prevMosaicState.totalTiles) {
-        console.log("Cannot add photo - mosaic not ready or no tiles available")
-        return prevMosaicState
-      }
-      const tileIndex = prevMosaicState.tileOrder[prevMosaicState.currentIndex]
+  // Photo queue for incoming photos
+  const [photoQueue, setPhotoQueue] = useState<PhotoData[]>([])
 
+  // Handle new photo from Pusher (enqueue)
+  const handleNewPhoto = useCallback((photoData: PhotoData) => {
+    setPhotoQueue(prev => [...prev, photoData])
+  }, [])
+
+  // Process photo queue when mosaic is ready and there are available tiles
+  useEffect(() => {
+    if (!mosaicReady) return
+    if (photoQueue.length === 0) return
+    if (mosaicState.currentIndex >= mosaicState.totalTiles) return
+
+    // Dequeue and add photo to mosaic
+    const photoData = photoQueue[0]
+    setPhotoQueue(prev => prev.slice(1))
+
+    setMosaicState(prevMosaicState => {
+      const tileIndex = prevMosaicState.tileOrder[prevMosaicState.currentIndex]
       // Update photo layer
       if (photoLayerRef.current) {
         const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
@@ -65,7 +76,6 @@ export default function Home() {
           tile.style.opacity = "1"
         }
       }
-
       // Update white layer
       if (whiteLayerRef.current) {
         const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
@@ -74,17 +84,15 @@ export default function Home() {
           tile.style.transform = "scale(0.8)"
         }
       }
-
       // Add photo with tileIndex to photos array
       setPhotos(prevPhotos => [
         ...prevPhotos,
         { ...photoData, tileIndex }
       ])
-
       // Increment currentIndex
       return { ...prevMosaicState, currentIndex: prevMosaicState.currentIndex + 1 }
     })
-  }, [mosaicReady])
+  }, [photoQueue, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles])
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
@@ -268,7 +276,6 @@ export default function Home() {
     if (!mainImage || !mosaicRef.current) return;
 
     const containerWidth = mosaicRef.current.clientWidth;
-    // Get main image aspect ratio
     const img = new window.Image();
     img.src = mainImage;
     img.onload = () => {
