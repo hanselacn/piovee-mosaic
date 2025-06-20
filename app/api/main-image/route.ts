@@ -3,6 +3,7 @@ import {
   uploadPhotoWithServiceAccount,
   listFilesWithServiceAccount,
   getFileContentWithServiceAccount,
+  deleteFileWithServiceAccount,
   isServiceAccountConfigured,
 } from "@/lib/google-service-account"
 import { db } from '@/lib/firestore'
@@ -25,33 +26,33 @@ export async function POST(request: NextRequest) {
 
     if (!imageData) {
       return NextResponse.json({ error: "No image data provided" }, { status: 400 })
-    }
+    }    console.log("🗑️ Clearing existing main images...")
 
-    console.log("🗑️ Clearing existing main images...")
-
-    // Get existing files and delete main images
-    const existingFiles = await listFilesWithServiceAccount(process.env.GOOGLE_DRIVE_FOLDER_ID!)
-    const mainImageFiles = existingFiles.filter((file) => file.name?.startsWith("main-image-"))
-
-    for (const file of mainImageFiles) {
-      if (file.id) {
+    // Get existing main image from Firestore and delete from Google Drive
+    const existingDoc = await db.collection('main-image').doc('current').get()
+    if (existingDoc.exists) {
+      const existingData = existingDoc.data()
+      if (existingData?.fileId) {
         try {
-          // We'll need to add a delete function to the service account lib
-          console.log(`🗑️ Would delete existing main image: ${file.name}`)
+          await deleteFileWithServiceAccount(existingData.fileId)
+          console.log(`🗑️ Deleted existing main image: ${existingData.fileName}`)
         } catch (error) {
-          console.error(`❌ Error deleting existing main image ${file.id}:`, error)
+          console.error(`❌ Error deleting existing main image:`, error)
         }
       }
-    }
-
-    // Generate a unique filename with main-image prefix
+    }// Generate a unique filename with main-image prefix
     const fileName = `main-image-${Date.now()}.jpg`
 
     console.log(`📤 Uploading main image: ${fileName}`)
 
-    // Save to Firestore with grid configuration
+    // Upload to Google Drive first
+    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, process.env.GOOGLE_DRIVE_FOLDER_ID!)
+
+    console.log("✅ Main image uploaded to Google Drive")
+
+    // Save metadata and grid configuration to Firestore (without the large image data)
     await db.collection('main-image').doc('current').set({
-      dataUrl: imageData,
+      fileId,
       fileName,
       timestamp: Date.now(),
       gridConfig: gridConfig || {
@@ -62,10 +63,7 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    console.log("✅ Main image and grid config saved to Firestore")
-
-    // Upload using service account
-    const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, process.env.GOOGLE_DRIVE_FOLDER_ID!)
+    console.log("✅ Main image metadata and grid config saved to Firestore")
 
     console.log(`✅ Main image uploaded successfully: ${fileId}`)
 
@@ -92,7 +90,7 @@ export async function GET() {
   try {
     console.log("📥 Main image fetch request received")
 
-    // Get main image from Firestore
+    // Get main image metadata from Firestore
     const doc = await db.collection('main-image').doc('current').get()
     
     if (!doc.exists) {
@@ -101,12 +99,27 @@ export async function GET() {
     }
 
     const data = doc.data()
-    console.log("✅ Main image loaded successfully from Firestore")
+    
+    // Get the image data from Google Drive
+    let dataUrl = null
+    if (data?.fileId) {
+      try {
+        console.log("📥 Fetching image data from Google Drive...")
+        dataUrl = await getFileContentWithServiceAccount(data.fileId)
+        console.log("✅ Image data retrieved from Google Drive")
+      } catch (error) {
+        console.error("❌ Error fetching image from Google Drive:", error)
+        // Continue without image data - the grid config is still useful
+      }
+    }
+    
+    console.log("✅ Main image loaded successfully")
 
     return NextResponse.json({
       mainImage: {
-        dataUrl: data?.dataUrl,
+        dataUrl,
         fileName: data?.fileName,
+        fileId: data?.fileId,
         gridConfig: data?.gridConfig,
         timestamp: data?.timestamp,
       },

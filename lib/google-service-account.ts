@@ -203,3 +203,21 @@ export async function clearFolderWithServiceAccount(folderId: string): Promise<{
     throw error
   }
 }
+
+// Delete a specific file from Google Drive
+export async function deleteFileWithServiceAccount(fileId: string): Promise<void> {
+  const drive = getDriveService()
+
+  try {
+    console.log(`🗑️ Deleting file: ${fileId}`)
+    
+    await drive.files.delete({
+      fileId: fileId,
+    })
+    
+    console.log(`✅ File deleted successfully: ${fileId}`)
+  } catch (error) {
+    console.error(`❌ Error deleting file ${fileId}:`, error)
+    throw error
+  }
+}
