@@ -45,32 +45,37 @@ export default function CameraPage() {
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
     
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
-    setPhotos((prev) => [...prev, dataUrl])
+    setPhotos((prev) => [...prev, dataUrl]);
 
     try {
-      console.log(`Uploading photo ${photoCount + 1} to Firestore...`);
+      console.log(`Uploading photo ${photoCount + 1} to mosaic queue...`);
       
-      // 1. Upload photo to Firestore queue
-      const firestoreRes = await fetch("/api/mosaic-photos", {
+      // Upload photo to mosaic queue (will store in Google Drive + Firestore metadata)
+      const mosaicRes = await fetch("/api/mosaic-photos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           photoData: dataUrl,
-          fileName: `photo-${Date.now()}.jpg`,
+          fileName: `camera-photo-${Date.now()}.jpg`,
           timestamp: Date.now(),
         }),
       });
-      if (!firestoreRes.ok) throw new Error("Failed to upload photo to Firestore queue");
-
-      console.log("Photo uploaded to Firestore, triggering Pusher event...");
       
-      // 2. Trigger Pusher event to notify main page
+      if (!mosaicRes.ok) {
+        const errorData = await mosaicRes.json();
+        throw new Error(errorData.error || "Failed to upload photo to mosaic queue");
+      }
+
+      console.log("Photo uploaded to mosaic queue, triggering Pusher event...");
+      
+      // Trigger Pusher event to notify main page
       await fetch("/api/test-pusher", { method: "POST" });
       
       setPhotoCount((prev) => prev + 1);
-      console.log("Photo uploaded to Firestore queue and Pusher triggered successfully");
+      console.log("Photo uploaded to mosaic queue and Pusher triggered successfully");
     } catch (error) {
       console.error("Error uploading photo:", error);
+      alert("Failed to upload photo. Please try again.");
     }
   }
 
