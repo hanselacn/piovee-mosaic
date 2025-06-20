@@ -69,33 +69,49 @@ export default function Home() {
     fetchPhotos();
   }, [fetchPhotos]);
 
-  // Process photo queue when mosaic is ready and there are available tiles
+  // Process photo queue efficiently: take one photo, collage it, mark as used, repeat
   useEffect(() => {
-    if (!mosaicReady) return
-    if (photos.length === 0) return
-    if (mosaicState.currentIndex >= mosaicState.totalTiles) return
+    if (!mosaicReady) return;
+    if (photos.length === 0) return;
+    if (mosaicState.currentIndex >= mosaicState.totalTiles) return;
 
-    // Add next photo to mosaic
-    const photoData = photos[mosaicState.currentIndex]
-    if (!photoData) return
-    const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex]
-    // Update photo layer
-    if (photoLayerRef.current) {
-      const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
-      if (tile) {
-        tile.style.backgroundImage = `url('${photoData.photoData}')`
-        tile.style.opacity = "1"
+    // Take the first unused photo from the queue
+    const nextPhoto = photos[0];
+    if (!nextPhoto) return;
+
+    const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex];
+    
+    // Collage the photo to the mosaic
+    if (photoLayerRef.current && whiteLayerRef.current) {
+      const photoTile = photoLayerRef.current.children[tileIndex] as HTMLElement;
+      const whiteTile = whiteLayerRef.current.children[tileIndex] as HTMLElement;
+      
+      if (photoTile && whiteTile) {
+        photoTile.style.backgroundImage = `url('${nextPhoto.photoData}')`;
+        photoTile.style.opacity = "1";
+        
+        setTimeout(() => {
+          whiteTile.style.opacity = "0";
+          whiteTile.style.transform = "scale(0.8)";
+        }, 50);
       }
     }
-    // Update white layer
-    if (whiteLayerRef.current) {
-      const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
-      if (tile) {
-        tile.style.opacity = "0"
-        tile.style.transform = "scale(0.8)"
-      }
-    }
-    setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
+
+    // Update mosaic state
+    setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }));
+
+    // Mark photo as used in Firestore (remove from queue)
+    fetch('/api/mosaic-photos', {
+      method: 'PATCH',
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: nextPhoto.id }),
+    }).then(() => {
+      // Remove photo from local state to trigger next photo processing
+      setPhotos(prev => prev.slice(1));
+    }).catch(err => {
+      console.error('Failed to mark photo as used:', err);
+    });
+
   }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder])
 
   // Create mosaic grid
@@ -226,36 +242,17 @@ export default function Home() {
           pusher,
           "camera-channel",
           "photo-uploaded",
-          async (data: { fileName: string }) => {
+          () => {
             try {
-              console.log("Received photo notification:", data.fileName)
-              setStatus("Downloading new photo...")
-              
-              const res = await fetch(`/api/camera-photos?filename=${encodeURIComponent(data.fileName)}`)
-              if (!res.ok) throw new Error("Failed to fetch photo")
-              
-              const json = await res.json()
-              console.log("Received photo data:", json.photos?.[0]?.fileName)
-              
-              if (json.photos?.[0]?.photoData) {
-                handleNewPhoto();
-                setStatus("✅ Photo added to mosaic")
-                setTimeout(() => setStatus(""), 3000)
-              } else {
-                throw new Error("No photo data received")
-              }
+              console.log("Received photo notification, refreshing queue...");
+              setStatus("New photo detected, updating queue...");
+              handleNewPhoto(); // This will fetch the latest queue from Firestore
+              setStatus("✅ Photo queue updated");
+              setTimeout(() => setStatus(""), 3000);
             } catch (err) {
-              console.error("Error fetching photo:", err)
-              setStatus("❌ Failed to add photo")
-              setTimeout(() => setStatus(""), 3000)
-
-              // Retry subscription on error if we haven't exceeded max retries
-              if (retryCount < maxRetries) {
-                retryCount++
-                console.log(`Retrying Pusher subscription (attempt ${retryCount})`)
-                unsubscribe?.()
-                setupSubscription()
-              }
+              console.error("Error handling photo notification:", err);
+              setStatus("❌ Failed to update queue");
+              setTimeout(() => setStatus(""), 3000);
             }
           }
         )

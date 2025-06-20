@@ -46,23 +46,27 @@ export default function CameraPage() {
 
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
     setPhotos((prev) => [...prev, dataUrl])
-    setPhotoCount((prev) => prev + 1)
 
     try {
-      const response = await fetch("/api/upload-photo", {
+      // 1. Upload photo to Firestore queue
+      const firestoreRes = await fetch("/api/mosaic-photos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           photoData: dataUrl,
           fileName: `photo-${Date.now()}.jpg`,
+          timestamp: Date.now(),
         }),
-      })
+      });
+      if (!firestoreRes.ok) throw new Error("Failed to upload photo to Firestore queue");
 
-      if (!response.ok) throw new Error("Failed to upload photo")
-
-      console.log("Photo uploaded successfully")
+      // 2. Trigger Pusher event to notify main page
+      await fetch("/api/test-pusher", { method: "POST" });
+      
+      setPhotoCount((prev) => prev + 1);
+      console.log("Photo uploaded to Firestore queue and Pusher triggered successfully");
     } catch (error) {
-      console.error("Error uploading photo:", error)
+      console.error("Error uploading photo:", error);
     }
   }
 

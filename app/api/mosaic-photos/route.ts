@@ -24,3 +24,11 @@ export async function POST(req: NextRequest) {
   });
   return NextResponse.json({ id: docRef.id });
 }
+
+// PATCH: Mark a photo as used
+export async function PATCH(req: NextRequest) {
+  const { id } = await req.json();
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  await db.collection("mosaic-photos").doc(id).update({ used: true });
+  return NextResponse.json({ success: true });
+}
