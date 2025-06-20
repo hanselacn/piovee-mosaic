@@ -114,14 +114,12 @@ export default function Home() {
       ...prev, 
       currentIndex: prev.currentIndex + 1,
       tileOrder: newTileOrder
-    }));
-
-    // Mark photo as used in Firestore (remove from queue)
-    console.log(`Marking photo ${nextPhoto.id} as used...`);
+    }));    // Mark photo as used in Firestore (remove from queue)
+    console.log(`Marking photo ${nextPhoto.id} as used and saving tile position ${tileIndex}...`);
     fetch('/api/mosaic-photos', {
       method: 'PATCH',
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: nextPhoto.id }),
+      body: JSON.stringify({ id: nextPhoto.id, tileIndex }),
     }).then(() => {
       console.log(`Photo ${nextPhoto.id} marked as used, removing from local queue`);
       // Remove photo from local state to trigger next photo processing
@@ -132,8 +130,7 @@ export default function Home() {
       setIsProcessing(false); // Allow retry
     });
 
-  }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder, isProcessing])
-  // Create mosaic grid
+  }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder, isProcessing])  // Create mosaic grid using saved configuration
   const createMosaic = useCallback(async () => {
     if (!mainImage || !mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
 
@@ -145,27 +142,45 @@ export default function Home() {
     })
 
     const aspectRatio = img.width / img.height
-    const { tileSize } = mosaicState
-      // Calculate container dimensions to match main image aspect ratio
-    const containerWidth = mosaicRef.current.clientWidth
-    const containerHeight = Math.round(containerWidth / aspectRatio)
     
-    // Set container height to match main image aspect ratio
+    // Use grid configuration from Firestore if available, otherwise calculate
+    let cols, rows, tileSize, totalTiles
+    
+    if (mosaicState.cols && mosaicState.rows && mosaicState.tileSize) {
+      // Use saved grid configuration
+      cols = mosaicState.cols
+      rows = mosaicState.rows
+      tileSize = mosaicState.tileSize
+      totalTiles = mosaicState.totalTiles
+      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)
+    } else {
+      // Calculate new grid configuration
+      const containerWidth = mosaicRef.current.clientWidth
+      const containerHeight = Math.round(containerWidth / aspectRatio)
+      tileSize = mosaicState.tileSize || 20
+      
+      cols = Math.ceil(containerWidth / tileSize)
+      rows = Math.ceil(containerHeight / tileSize)
+      totalTiles = cols * rows
+      console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles)`)
+    }
+    
+    // Calculate container dimensions to match grid
+    const containerWidth = cols * tileSize
+    const containerHeight = rows * tileSize
+    
+    // Set container dimensions
+    mosaicRef.current.style.width = `${containerWidth}px`
     mosaicRef.current.style.height = `${containerHeight}px`
-    
-    // Calculate grid size to completely cover the container (round UP to ensure full coverage)
-    const cols = Math.ceil(containerWidth / tileSize)
-    const rows = Math.ceil(containerHeight / tileSize)
-    const totalTiles = cols * rows
 
-    console.log(`Creating mosaic: ${cols}x${rows} grid (${totalTiles} tiles) for ${containerWidth}x${containerHeight}px container`)
-    console.log(`Mosaic will be ${cols * tileSize}x${rows * tileSize}px (slightly larger to ensure full coverage)`)
-
-    // Generate randomized tile order
-    const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
-    for (let i = tileOrder.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]]
+    // Generate randomized tile order if not already set
+    let tileOrder = mosaicState.tileOrder
+    if (!tileOrder || tileOrder.length !== totalTiles) {
+      tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
+      for (let i = tileOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tileOrder[i], tileOrder[j]] = [tileOrder[j], tileOrder[i]]
+      }
     }
 
     // Update mosaic state
@@ -175,7 +190,7 @@ export default function Home() {
       rows,
       totalTiles,
       tileOrder,
-      currentIndex: 0
+      tileSize
     }))
 
     // Create photo layer tiles
@@ -210,8 +225,7 @@ export default function Home() {
     // Set mosaic ready state
     setMosaicReady(true)
   }, [mainImage, mosaicState.tileSize])
-
-  // Load main image
+  // Load main image and grid configuration
   const loadMainImage = async () => {
     try {
       setLoading(true)
@@ -220,6 +234,16 @@ export default function Home() {
 
       if (data.mainImage?.dataUrl) {
         setMainImage(data.mainImage.dataUrl)
+        
+        // Load grid configuration from Firestore
+        if (data.mainImage.gridConfig) {
+          console.log("Loading grid config from Firestore:", data.mainImage.gridConfig)
+          setMosaicState(prev => ({
+            ...prev,
+            ...data.mainImage.gridConfig,
+            currentIndex: 0 // Reset index when loading new config
+          }))
+        }
       }
     } catch (err) {
       setError("Failed to load main image")
@@ -293,7 +317,6 @@ export default function Home() {
       console.log("Cleaning up Pusher subscription")
       unsubscribe?.()
     }  }, [mosaicReady, handleNewPhoto])
-
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
     if (!mosaicReady || mosaicState.currentIndex >= mosaicState.tileOrder.length || photos.length === 0) {
@@ -453,6 +476,67 @@ export default function Home() {
       setTimeout(() => setStatus(''), 3000)
     }
   }
+
+  // Restore mosaic state from Firestore (load all used photos and place them on their tiles)
+  const restoreMosaicState = useCallback(async () => {
+    if (!mosaicReady || !photoLayerRef.current || !whiteLayerRef.current) return
+
+    try {
+      console.log('Restoring mosaic state from Firestore...')
+      
+      // Fetch all used photos with their tile positions
+      const response = await fetch('/api/mosaic-photos?used=true')
+      const data = await response.json()
+      const usedPhotos = data.photos || []
+      
+      console.log(`Found ${usedPhotos.length} used photos to restore`)
+      
+      if (usedPhotos.length === 0) return
+
+      // Sort by timestamp to restore in order
+      usedPhotos.sort((a: PhotoData, b: PhotoData) => a.timestamp - b.timestamp)
+      
+      let restoredCount = 0
+      
+      for (const photo of usedPhotos) {
+        if (photo.tileIndex !== undefined && photo.tileIndex !== null) {
+          const photoTile = photoLayerRef.current.children[photo.tileIndex] as HTMLElement
+          const whiteTile = whiteLayerRef.current.children[photo.tileIndex] as HTMLElement
+          
+          if (photoTile && whiteTile) {
+            // Restore the photo to its saved tile position
+            photoTile.style.backgroundImage = `url('${photo.photoData}')`
+            photoTile.style.opacity = "1"
+            whiteTile.style.opacity = "0"
+            whiteTile.style.transform = "scale(0.8)"
+            restoredCount++
+          }
+        }
+      }
+      
+      // Update the current index to reflect how many tiles are occupied
+      setMosaicState(prev => ({
+        ...prev,
+        currentIndex: restoredCount
+      }))
+      
+      console.log(`✅ Restored ${restoredCount} photos to their tile positions`);
+      setStatus(`✅ Restored ${restoredCount} photos from previous session`);
+      setTimeout(() => setStatus(""), 3000);
+    } catch (error) {
+      console.error('Error restoring mosaic state:', error)
+      setStatus('❌ Failed to restore previous mosaic state')
+      setTimeout(() => setStatus(""), 3000)
+    }
+  }, [mosaicReady]);
+
+  // Effect: Restore mosaic state when mosaic becomes ready
+  useEffect(() => {
+    if (mosaicReady) {
+      console.log("Mosaic is ready, restoring state from Firestore")
+      restoreMosaicState()
+    }
+  }, [mosaicReady, restoreMosaicState])
 
   // Loading state
   if (loading) {

@@ -5,6 +5,7 @@ import {
   getFileContentWithServiceAccount,
   isServiceAccountConfigured,
 } from "@/lib/google-service-account"
+import { db } from '@/lib/firestore'
 import { writeFile, unlink } from "fs/promises"
 import path from "path"
 
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
     }
 
-    const { imageData } = await request.json()
+    const { imageData, gridConfig } = await request.json()
 
     if (!imageData) {
       return NextResponse.json({ error: "No image data provided" }, { status: 400 })
@@ -47,6 +48,21 @@ export async function POST(request: NextRequest) {
     const fileName = `main-image-${Date.now()}.jpg`
 
     console.log(`📤 Uploading main image: ${fileName}`)
+
+    // Save to Firestore with grid configuration
+    await db.collection('main-image').doc('current').set({
+      dataUrl: imageData,
+      fileName,
+      timestamp: Date.now(),
+      gridConfig: gridConfig || {
+        cols: 20,
+        rows: 15,
+        tileSize: 20,
+        totalTiles: 300
+      }
+    })
+
+    console.log("✅ Main image and grid config saved to Firestore")
 
     // Upload using service account
     const fileId = await uploadPhotoWithServiceAccount(imageData, fileName, process.env.GOOGLE_DRIVE_FOLDER_ID!)
@@ -76,33 +92,23 @@ export async function GET() {
   try {
     console.log("📥 Main image fetch request received")
 
-    // Check if service account is configured
-    if (!isServiceAccountConfigured()) {
-      console.error("❌ Service account not configured")
-      return NextResponse.json({ error: "Service account not configured" }, { status: 503 })
-    }
-
-    // List files to find the most recent main image
-    const files = await listFilesWithServiceAccount(process.env.GOOGLE_DRIVE_FOLDER_ID!)
-    const mainImage = files.find((file) => file.name?.startsWith("main-image-"))
-
-    if (!mainImage || !mainImage.id) {
-      console.log("📥 No main image found")
+    // Get main image from Firestore
+    const doc = await db.collection('main-image').doc('current').get()
+    
+    if (!doc.exists) {
+      console.log("📥 No main image found in Firestore")
       return NextResponse.json({ mainImage: null })
     }
 
-    console.log(`📥 Found main image: ${mainImage.name}`)
-
-    // Get the image content
-    const dataUrl = await getFileContentWithServiceAccount(mainImage.id)
-
-    console.log("✅ Main image loaded successfully")
+    const data = doc.data()
+    console.log("✅ Main image loaded successfully from Firestore")
 
     return NextResponse.json({
       mainImage: {
-        id: mainImage.id,
-        name: mainImage.name,
-        dataUrl,
+        dataUrl: data?.dataUrl,
+        fileName: data?.fileName,
+        gridConfig: data?.gridConfig,
+        timestamp: data?.timestamp,
       },
     })
   } catch (error) {

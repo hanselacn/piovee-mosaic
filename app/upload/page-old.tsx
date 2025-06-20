@@ -24,7 +24,6 @@ export default function UploadPage() {
   const previewRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [gridPreview, setGridPreview] = useState<GridPreview | null>(null)
-
   // Calculate grid preview when image is selected or tile size changes
   useEffect(() => {
     if (selectedImage && previewRef.current) {
@@ -133,7 +132,6 @@ export default function UploadPage() {
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
   }
-
   // Upload image with grid configuration
   const uploadImage = async () => {
     if (!selectedImage || !gridPreview) return
@@ -178,7 +176,7 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
+    <div className="container mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Upload Main Image</h1>
 
       <div className="mb-4">
@@ -196,134 +194,88 @@ export default function UploadPage() {
         </Alert>
       )}
 
-      {/* Success Alert */}
-      {uploadSuccess && (
-        <Alert className="mb-4 border-green-500 bg-green-50">
-          <AlertDescription className="text-green-700">
-            <strong>Success!</strong> Main image uploaded successfully!{" "}
-            <Link href="/" className="underline">
-              Go to Mosaic
-            </Link>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Image Upload Section */}
-        <Card>
-          <CardContent className="p-6">
-            <h2 className="text-xl font-semibold mb-4">Select Image</h2>
-            <div
-              className="relative border-2 border-dashed border-gray-300 rounded-md p-6 text-center cursor-pointer transition-colors hover:border-gray-400"
-              onClick={() => fileInputRef.current?.click()}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-            >
-              {selectedImage ? (
-                <div className="relative w-full h-64 overflow-hidden rounded-md">
-                  <img
-                    src={selectedImage}
-                    alt="Selected"
-                    className="w-full h-full object-cover"
-                  />
-                  {/* Grid overlay */}
-                  <canvas
-                    ref={canvasRef}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    style={{ mixBlendMode: 'overlay' }}
-                  />
-                </div>
-              ) : (
-                <div className="py-12">
-                  <div className="text-4xl mb-4">📷</div>
-                  <p className="text-gray-500 mb-2">Click or drag and drop an image here</p>
-                  <p className="text-sm text-gray-400">Supports: JPG, PNG, GIF</p>
-                </div>
-              )}
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="image/*"
-                className="hidden"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Grid Configuration Section */}
-        <Card>
-          <CardContent className="p-6">
-            <h2 className="text-xl font-semibold mb-4">Grid Configuration</h2>
-            
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <div
+            ref={previewRef}
+            className="relative border-2 border-dashed border-gray-300 rounded-md p-6 text-center cursor-pointer overflow-hidden"
+            onClick={() => fileInputRef.current?.click()}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+          >
             {selectedImage ? (
-              <div className="space-y-4">
-                {/* Tile Size Slider */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Tile Size: {tileSize}px
-                  </label>
-                  <input
-                    type="range"
-                    min="10"
-                    max="50"
-                    value={tileSize}
-                    onChange={(e) => setTileSize(Number(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>10px (Fine)</span>
-                    <span>50px (Coarse)</span>
-                  </div>
-                </div>
-
-                {/* Grid Preview Stats */}
+              <div className="relative">
+                <img
+                  src={selectedImage}
+                  alt="Selected"
+                  className="max-h-96 mx-auto relative z-10"
+                />
                 {gridPreview && (
-                  <div className="bg-gray-50 p-4 rounded-md">
-                    <h3 className="font-medium mb-2">Grid Preview</h3>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <span className="text-gray-600">Columns:</span>
-                        <span className="font-mono ml-2">{gridPreview.cols}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Rows:</span>
-                        <span className="font-mono ml-2">{gridPreview.rows}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Total Tiles:</span>
-                        <span className="font-mono ml-2">{gridPreview.totalTiles}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Tile Size:</span>
-                        <span className="font-mono ml-2">{gridPreview.tileSize}px</span>
-                      </div>
+                  <div className="absolute inset-0 z-20">
+                    <div
+                      className="grid"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: `repeat(${gridPreview.cols}, ${gridPreview.tileSize}px)`,
+                        gridTemplateRows: `repeat(${gridPreview.rows}, ${gridPreview.tileSize}px)`,
+                      }}
+                    >
+                      {Array.from({ length: gridPreview.cols * gridPreview.rows }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="border border-white/20 transition-opacity duration-300 hover:bg-white/10"
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
-
-                {/* Upload Button */}
-                <Button
-                  onClick={uploadImage}
-                  disabled={uploading || !gridPreview}
-                  className="w-full"
-                  size="lg"
-                >
-                  {uploading ? "Uploading..." : "Upload Image & Create Mosaic"}
-                </Button>
-
-                <div className="text-xs text-gray-500 text-center">
-                  The grid overlay shows how photos will be arranged on your image
-                </div>
               </div>
             ) : (
-              <div className="text-center py-8">
-                <div className="text-gray-400 mb-2">⚙️</div>
-                <p className="text-gray-500">Select an image to configure the grid</p>
+              <div className="py-12">
+                <p className="text-gray-500">Click or drag and drop an image here</p>
               </div>
             )}
-          </CardContent>
-        </Card>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+          {gridPreview && selectedImage && (
+            <div className="mt-4 text-sm text-gray-500 text-center">
+              Grid Preview: {gridPreview.cols} × {gridPreview.rows} tiles (
+              {gridPreview.tileSize}px each)
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-center">
+        <Button onClick={uploadImage} disabled={!selectedImage || uploading} className="w-48">
+          {uploading ? "Uploading..." : "Set as Main Image"}
+        </Button>
+      </div>
+
+      {uploadSuccess && (
+        <div className="mt-4 text-center text-green-600">
+          <strong>✅ Image uploaded successfully!</strong>
+          <p className="text-sm mt-1">You can now go back to the mosaic to see your image.</p>
+        </div>
+      )}
+
+      {/* Instructions */}
+      <div className="mt-8 p-4 bg-blue-50 rounded-md">
+        <h3 className="font-bold mb-2 text-blue-800">Upload Instructions:</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• Select or drag and drop an image file</li>
+          <li>• White grid overlay shows how your image will be divided into tiles</li>
+          <li>• Each tile will be replaced with a camera photo in the mosaic</li>
+          <li>• The image will be uploaded to Google Drive using the service account</li>
+          <li>• No sign-in required - uses automatic authentication</li>
+          <li>• Camera photos will enhance your main image with the soft-light effect</li>
+        </ul>
       </div>
     </div>
   )
