@@ -31,12 +31,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>("")
   const [status, setStatus] = useState<string>("")
-
   // Mosaic state
   const [mosaicState, setMosaicState] = useState<MosaicState>({
     cols: 0,
     rows: 0,
-    tileSize: 30, // Reduced from 100 to 30 for more detailed mosaic
+    tileSize: 20, // Smaller tiles for more detailed mosaic
     totalTiles: 0,
     currentIndex: 0,    tileOrder: [],
   })
@@ -83,7 +82,16 @@ export default function Home() {
     console.log(`Processing photo ${nextPhoto.id} (${photos.length} photos in queue)`);
     setIsProcessing(true);
 
-    const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex];
+    // Pick a truly random available tile instead of sequential
+    const availableTiles = mosaicState.tileOrder.slice(mosaicState.currentIndex);
+    const randomIndex = Math.floor(Math.random() * availableTiles.length);
+    const tileIndex = availableTiles[randomIndex];
+    
+    // Swap the selected tile to the current position to mark it as used
+    const newTileOrder = [...mosaicState.tileOrder];
+    const currentPos = mosaicState.currentIndex;
+    const selectedPos = currentPos + randomIndex;
+    [newTileOrder[currentPos], newTileOrder[selectedPos]] = [newTileOrder[selectedPos], newTileOrder[currentPos]];
     
     // Collage the photo to the mosaic
     if (photoLayerRef.current && whiteLayerRef.current) {
@@ -101,8 +109,12 @@ export default function Home() {
       }
     }
 
-    // Update mosaic state
-    setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }));
+    // Update mosaic state with new tile order and incremented index
+    setMosaicState(prev => ({ 
+      ...prev, 
+      currentIndex: prev.currentIndex + 1,
+      tileOrder: newTileOrder
+    }));
 
     // Mark photo as used in Firestore (remove from queue)
     console.log(`Marking photo ${nextPhoto.id} as used...`);
@@ -121,7 +133,6 @@ export default function Home() {
     });
 
   }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder, isProcessing])
-
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
     if (!mainImage || !mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
@@ -136,15 +147,19 @@ export default function Home() {
     const aspectRatio = img.width / img.height
     const { tileSize } = mosaicState
     
-    // Calculate grid size based on container and ensure it's not smaller than image
+    // Calculate container dimensions to match main image aspect ratio
     const containerWidth = mosaicRef.current.clientWidth
-    // Calculate minimum required columns and rows
-    const minCols = Math.ceil(img.width / tileSize)
-    const minRows = Math.ceil(img.height / tileSize)
-    // Calculate actual columns based on container width, but not less than minimum
-    const cols = Math.max(Math.floor(containerWidth / tileSize), minCols)
-    const rows = Math.max(Math.floor(cols / aspectRatio), minRows)
+    const containerHeight = Math.round(containerWidth / aspectRatio)
+    
+    // Set container height to match main image aspect ratio
+    mosaicRef.current.style.height = `${containerHeight}px`
+    
+    // Calculate grid size based on container dimensions
+    const cols = Math.floor(containerWidth / tileSize)
+    const rows = Math.floor(containerHeight / tileSize)
     const totalTiles = cols * rows
+
+    console.log(`Creating mosaic: ${cols}x${rows} grid (${totalTiles} tiles) for ${containerWidth}x${containerHeight}px container`)
 
     // Generate randomized tile order
     const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
@@ -277,46 +292,7 @@ export default function Home() {
     return () => {
       console.log("Cleaning up Pusher subscription")
       unsubscribe?.()
-    }
-  }, [mosaicReady, handleNewPhoto])
-
-  // Calculate grid dimensions based on main image aspect ratio and container width
-  useEffect(() => {
-    if (!mainImage || !mosaicRef.current) return;
-
-    const containerWidth = mosaicRef.current.clientWidth;
-    const img = new window.Image();
-    img.src = mainImage;
-    img.onload = () => {
-      const aspectRatio = img.width / img.height;
-      // Set container height to match main image aspect ratio
-      const containerHeight = Math.round(containerWidth / aspectRatio);
-      if (mosaicRef.current) {
-        mosaicRef.current.style.height = `${containerHeight}px`;
-      }
-      const tileSize = mosaicState.tileSize;
-      let cols = Math.floor(containerWidth / tileSize);
-      let rows = Math.floor(containerHeight / tileSize);
-      // Ensure minimum number of tiles for good mosaic effect
-      const minTiles = 200;
-      if (cols * rows < minTiles) {
-        const scale = Math.sqrt(minTiles / (cols * rows));
-        cols = Math.floor(cols * scale);
-        rows = Math.floor(rows * scale);
-      }
-      const totalTiles = cols * rows;
-      const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
-        .sort(() => Math.random() - 0.5);
-      setMosaicState(prev => ({
-        ...prev,
-        cols,
-        rows,
-        totalTiles,
-        tileOrder,
-        currentIndex: 0,
-      }));
-    };
-  }, [mainImage, mosaicState.tileSize]);
+    }  }, [mosaicReady, handleNewPhoto])
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
@@ -571,12 +547,11 @@ export default function Home() {
                 <AlertDescription>{status}</AlertDescription>
               </Alert>
             </div>
-          )}
-
-          {/* Mosaic display */}
+          )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className="relative w-full aspect-video bg-gray-800 rounded-lg overflow-hidden"
+            className="relative w-full bg-gray-800 rounded-lg overflow-hidden"
+            style={{ minHeight: '400px' }}
           >
             {mainImage && (
               <img
