@@ -263,38 +263,43 @@ export default function Home() {
     }
   }, [mosaicReady, handleNewPhoto])
 
-  // Calculate grid dimensions based on displayed mosaic container size
+  // Calculate grid dimensions based on main image aspect ratio and container width
   useEffect(() => {
     if (!mainImage || !mosaicRef.current) return;
 
     const containerWidth = mosaicRef.current.clientWidth;
-    const containerHeight = mosaicRef.current.clientHeight;
-    const aspectRatio = containerWidth / containerHeight;
-    const tileSize = mosaicState.tileSize;
-
-    let cols = Math.floor(containerWidth / tileSize);
-    let rows = Math.floor(containerHeight / tileSize);
-
-    // Ensure minimum number of tiles for good mosaic effect
-    const minTiles = 200;
-    if (cols * rows < minTiles) {
-      const scale = Math.sqrt(minTiles / (cols * rows));
-      cols = Math.floor(cols * scale);
-      rows = Math.floor(rows * scale);
-    }
-
-    const totalTiles = cols * rows;
-    const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
-      .sort(() => Math.random() - 0.5);
-
-    setMosaicState(prev => ({
-      ...prev,
-      cols,
-      rows,
-      totalTiles,
-      tileOrder,
-      currentIndex: 0,
-    }));
+    // Get main image aspect ratio
+    const img = new window.Image();
+    img.src = mainImage;
+    img.onload = () => {
+      const aspectRatio = img.width / img.height;
+      // Set container height to match main image aspect ratio
+      const containerHeight = Math.round(containerWidth / aspectRatio);
+      if (mosaicRef.current) {
+        mosaicRef.current.style.height = `${containerHeight}px`;
+      }
+      const tileSize = mosaicState.tileSize;
+      let cols = Math.floor(containerWidth / tileSize);
+      let rows = Math.floor(containerHeight / tileSize);
+      // Ensure minimum number of tiles for good mosaic effect
+      const minTiles = 200;
+      if (cols * rows < minTiles) {
+        const scale = Math.sqrt(minTiles / (cols * rows));
+        cols = Math.floor(cols * scale);
+        rows = Math.floor(rows * scale);
+      }
+      const totalTiles = cols * rows;
+      const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
+        .sort(() => Math.random() - 0.5);
+      setMosaicState(prev => ({
+        ...prev,
+        cols,
+        rows,
+        totalTiles,
+        tileOrder,
+        currentIndex: 0,
+      }));
+    };
   }, [mainImage, mosaicState.tileSize]);
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
