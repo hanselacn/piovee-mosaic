@@ -146,20 +146,20 @@ export default function Home() {
 
     const aspectRatio = img.width / img.height
     const { tileSize } = mosaicState
-    
-    // Calculate container dimensions to match main image aspect ratio
+      // Calculate container dimensions to match main image aspect ratio
     const containerWidth = mosaicRef.current.clientWidth
     const containerHeight = Math.round(containerWidth / aspectRatio)
     
     // Set container height to match main image aspect ratio
     mosaicRef.current.style.height = `${containerHeight}px`
     
-    // Calculate grid size based on container dimensions
-    const cols = Math.floor(containerWidth / tileSize)
-    const rows = Math.floor(containerHeight / tileSize)
+    // Calculate grid size to completely cover the container (round UP to ensure full coverage)
+    const cols = Math.ceil(containerWidth / tileSize)
+    const rows = Math.ceil(containerHeight / tileSize)
     const totalTiles = cols * rows
 
     console.log(`Creating mosaic: ${cols}x${rows} grid (${totalTiles} tiles) for ${containerWidth}x${containerHeight}px container`)
+    console.log(`Mosaic will be ${cols * tileSize}x${rows * tileSize}px (slightly larger to ensure full coverage)`)
 
     // Generate randomized tile order
     const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
