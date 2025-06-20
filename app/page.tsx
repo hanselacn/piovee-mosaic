@@ -441,23 +441,32 @@ export default function Home() {
       setStatus("❌ Failed to save mosaic");
       setTimeout(() => setStatus(""), 5000);
     }
-  }
-  // Reset the mosaic
+  }  // Reset the entire mosaic (main image, grid config, and all photos)
   const resetMosaic = async () => {
-    if (!confirm('Are you sure you want to reset the mosaic? This will delete all photos and the main image.')) {
+    if (!confirm('Are you sure you want to reset the entire mosaic? This will delete the main image, grid configuration, and all photo data.')) {
       return
     }
 
     try {
-      setStatus('Resetting mosaic...')
+      setStatus('Resetting entire mosaic...')
 
-      // Reset state first
+      // Reset photos from Firestore
+      await fetch('/api/mosaic-photos', {
+        method: 'DELETE'
+      })
+
+      // Reset main image from Firestore
+      await fetch('/api/main-image', {
+        method: 'DELETE'
+      })
+
+      // Reset local state
       setPhotos([])
       setMainImage(null)
       setMosaicState({
         cols: 0,
         rows: 0,
-        tileSize: 50,
+        tileSize: 20,
         totalTiles: 0,
         currentIndex: 0,
         tileOrder: []
@@ -468,11 +477,64 @@ export default function Home() {
       if (photoLayerRef.current) photoLayerRef.current.innerHTML = ''
       if (whiteLayerRef.current) whiteLayerRef.current.innerHTML = ''
 
-      setStatus('✅ Mosaic reset complete')
+      setStatus('✅ Complete mosaic reset finished')
       setTimeout(() => setStatus(''), 3000)
     } catch (err) {
       console.error('Error resetting mosaic:', err)
       setStatus('❌ Failed to reset mosaic')
+      setTimeout(() => setStatus(''), 3000)
+    }
+  }
+
+  // Reset the mosaic photos only (keep main image and grid configuration)
+  const resetMosaicPhotos = async () => {
+    if (!confirm('Are you sure you want to reset all mosaic photos? This will clear the mosaic but keep photos in Google Drive.')) {
+      return
+    }
+
+    try {
+      setStatus('Resetting mosaic photos...')
+
+      // Reset photos from Firestore
+      const response = await fetch('/api/mosaic-photos', {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to reset mosaic photos')
+      }
+
+      const data = await response.json()
+      console.log(`✅ Reset ${data.deletedCount} mosaic photos`)
+
+      // Reset local state
+      setPhotos([])
+      setMosaicState(prev => ({
+        ...prev,
+        currentIndex: 0 // Reset to beginning
+      }))
+
+      // Clear the mosaic tiles visually
+      if (photoLayerRef.current && whiteLayerRef.current) {
+        const photoTiles = photoLayerRef.current.children
+        const whiteTiles = whiteLayerRef.current.children
+        
+        for (let i = 0; i < photoTiles.length; i++) {
+          const photoTile = photoTiles[i] as HTMLElement
+          const whiteTile = whiteTiles[i] as HTMLElement
+          
+          photoTile.style.backgroundImage = ''
+          photoTile.style.opacity = '0'
+          whiteTile.style.opacity = '1'
+          whiteTile.style.transform = 'scale(1)'
+        }
+      }
+
+      setStatus(`✅ Reset complete: ${data.deletedCount} photos cleared`)
+      setTimeout(() => setStatus(''), 3000)
+    } catch (err) {
+      console.error('Error resetting mosaic photos:', err)
+      setStatus('❌ Failed to reset mosaic photos')
       setTimeout(() => setStatus(''), 3000)
     }
   }
@@ -594,10 +656,12 @@ export default function Home() {
                 <span>Grid: {mosaicState.cols}×{mosaicState.rows}</span>
                 <span>Tile: {mosaicState.tileSize}px</span>
               </div>
-            </div>
-            <div className="flex gap-4">
+            </div>            <div className="flex gap-4">
               <Button variant="outline" asChild>
                 <Link href="/upload">Change Image</Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/camera">Add Photos</Link>
               </Button>
               <Button 
                 variant="secondary" 
@@ -607,10 +671,17 @@ export default function Home() {
                 Save to Drive
               </Button>
               <Button 
+                variant="outline" 
+                onClick={resetMosaicPhotos}
+                className="text-orange-600 hover:text-orange-700"
+              >
+                Reset Photos
+              </Button>
+              <Button 
                 variant="destructive" 
                 onClick={resetMosaic}
               >
-                Reset
+                Reset All
               </Button>
             </div>
           </div>

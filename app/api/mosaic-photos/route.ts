@@ -104,3 +104,32 @@ export async function PATCH(req: NextRequest) {
   await db.collection("mosaic-photos").doc(id).update(updateData);
   return NextResponse.json({ success: true });
 }
+
+// DELETE: Reset all mosaic photos (clear Firestore data but keep Google Drive files)
+export async function DELETE(req: NextRequest) {
+  try {
+    console.log('🗑️ Resetting all mosaic photos from Firestore...');
+    
+    // Get all photos from Firestore
+    const snapshot = await db.collection('mosaic-photos').get();
+    
+    // Delete all photo documents from Firestore
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    
+    await batch.commit();
+    
+    console.log(`✅ Reset complete: Deleted ${snapshot.docs.length} photo records from Firestore`);
+    
+    return NextResponse.json({ 
+      success: true, 
+      deletedCount: snapshot.docs.length,
+      message: "All mosaic photos reset successfully" 
+    });
+  } catch (error) {
+    console.error('Error resetting mosaic photos:', error);
+    return NextResponse.json({ error: 'Failed to reset mosaic photos' }, { status: 500 });
+  }
+}
