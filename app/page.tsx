@@ -48,51 +48,55 @@ export default function Home() {
   const photoLayerRef = useRef<HTMLDivElement>(null)
   const whiteLayerRef = useRef<HTMLDivElement>(null)
 
-  // Photo queue for incoming photos
-  const [photoQueue, setPhotoQueue] = useState<PhotoData[]>([])
+  // Fetch all unused photos from Firestore
+  const fetchPhotos = useCallback(async () => {
+    try {
+      const res = await fetch('/api/mosaic-photos?used=false');
+      const data = await res.json();
+      setPhotos(data.photos || []);
+    } catch (err) {
+      setError('Failed to fetch photos from Firestore');
+    }
+  }, []);
 
-  // Handle new photo from Pusher (enqueue)
-  const handleNewPhoto = useCallback((photoData: PhotoData) => {
-    setPhotoQueue(prev => [...prev, photoData])
-  }, [])
+  // On mount, fetch photos
+  useEffect(() => {
+    fetchPhotos();
+  }, [fetchPhotos]);
+
+  // On Pusher event, fetch photos again
+  const handleNewPhoto = useCallback(() => {
+    fetchPhotos();
+  }, [fetchPhotos]);
 
   // Process photo queue when mosaic is ready and there are available tiles
   useEffect(() => {
     if (!mosaicReady) return
-    if (photoQueue.length === 0) return
+    if (photos.length === 0) return
     if (mosaicState.currentIndex >= mosaicState.totalTiles) return
 
-    // Dequeue and add photo to mosaic
-    const photoData = photoQueue[0]
-    setPhotoQueue(prev => prev.slice(1))
-
-    setMosaicState(prevMosaicState => {
-      const tileIndex = prevMosaicState.tileOrder[prevMosaicState.currentIndex]
-      // Update photo layer
-      if (photoLayerRef.current) {
-        const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
-        if (tile) {
-          tile.style.backgroundImage = `url('${photoData.photoData}')`
-          tile.style.opacity = "1"
-        }
+    // Add next photo to mosaic
+    const photoData = photos[mosaicState.currentIndex]
+    if (!photoData) return
+    const tileIndex = mosaicState.tileOrder[mosaicState.currentIndex]
+    // Update photo layer
+    if (photoLayerRef.current) {
+      const tile = photoLayerRef.current.children[tileIndex] as HTMLElement
+      if (tile) {
+        tile.style.backgroundImage = `url('${photoData.photoData}')`
+        tile.style.opacity = "1"
       }
-      // Update white layer
-      if (whiteLayerRef.current) {
-        const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
-        if (tile) {
-          tile.style.opacity = "0"
-          tile.style.transform = "scale(0.8)"
-        }
+    }
+    // Update white layer
+    if (whiteLayerRef.current) {
+      const tile = whiteLayerRef.current.children[tileIndex] as HTMLElement
+      if (tile) {
+        tile.style.opacity = "0"
+        tile.style.transform = "scale(0.8)"
       }
-      // Add photo with tileIndex to photos array
-      setPhotos(prevPhotos => [
-        ...prevPhotos,
-        { ...photoData, tileIndex }
-      ])
-      // Increment currentIndex
-      return { ...prevMosaicState, currentIndex: prevMosaicState.currentIndex + 1 }
-    })
-  }, [photoQueue, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles])
+    }
+    setMosaicState(prev => ({ ...prev, currentIndex: prev.currentIndex + 1 }))
+  }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder])
 
   // Create mosaic grid
   const createMosaic = useCallback(async () => {
@@ -234,7 +238,7 @@ export default function Home() {
               console.log("Received photo data:", json.photos?.[0]?.fileName)
               
               if (json.photos?.[0]?.photoData) {
-                handleNewPhoto(json.photos[0])
+                handleNewPhoto();
                 setStatus("✅ Photo added to mosaic")
                 setTimeout(() => setStatus(""), 3000)
               } else {
