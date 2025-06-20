@@ -13,6 +13,8 @@ interface GridPreview {
   tileSize: number
 }
 
+const TILE_SIZE = 30 // Match the tile size from page.tsx
+
 export default function UploadPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -21,7 +23,6 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const [gridPreview, setGridPreview] = useState<GridPreview | null>(null)
-  const tileSize = 100 // Match the tile size from main page
 
   // Calculate grid preview when image is selected
   useEffect(() => {
@@ -29,11 +30,29 @@ export default function UploadPage() {
       const img = new Image()
       img.src = selectedImage
       img.onload = () => {
-        const aspectRatio = img.width / img.height
-        const containerWidth = previewRef.current?.clientWidth || 800
-        const cols = Math.floor(containerWidth / tileSize)
-        const rows = Math.floor(cols / aspectRatio)
-        setGridPreview({ cols, rows, tileSize })
+        const { width, height } = img
+        const aspectRatio = width / height
+
+        // Calculate grid dimensions
+        const cols = Math.floor(width / TILE_SIZE)
+        const rows = Math.floor(height / TILE_SIZE)
+
+        // Ensure minimum number of tiles
+        const minTiles = 200
+        let finalCols = cols
+        let finalRows = rows
+
+        if (cols * rows < minTiles) {
+          const scale = Math.sqrt(minTiles / (cols * rows))
+          finalCols = Math.floor(cols * scale)
+          finalRows = Math.floor(rows * scale)
+        }
+
+        setGridPreview({
+          cols: finalCols,
+          rows: finalRows,
+          tileSize: TILE_SIZE,
+        })
       }
     }
   }, [selectedImage])

@@ -36,7 +36,7 @@ export default function Home() {
   const [mosaicState, setMosaicState] = useState<MosaicState>({
     cols: 0,
     rows: 0,
-    tileSize: 100, // Increased from 50 to 100
+    tileSize: 30, // Reduced from 100 to 30 for more detailed mosaic
     totalTiles: 0,
     currentIndex: 0,
     tileOrder: [],
@@ -268,6 +268,44 @@ export default function Home() {
       unsubscribe?.()
     }
   }, [mosaicReady, handleNewPhoto])
+
+  // Calculate grid dimensions based on main image
+  useEffect(() => {
+    if (!mainImage) return;
+
+    const img = new Image();
+    img.src = mainImage;
+    img.onload = () => {
+      const { width, height } = img;
+      const aspectRatio = width / height;
+      
+      // Calculate grid dimensions to maintain image aspect ratio
+      let cols = Math.floor(width / mosaicState.tileSize);
+      let rows = Math.floor(height / mosaicState.tileSize);
+      
+      // Ensure minimum number of tiles for good mosaic effect
+      const minTiles = 200; // Minimum number of tiles for good mosaic effect
+      if (cols * rows < minTiles) {
+        // Scale up grid while maintaining aspect ratio
+        const scale = Math.sqrt(minTiles / (cols * rows));
+        cols = Math.floor(cols * scale);
+        rows = Math.floor(rows * scale);
+      }
+
+      const totalTiles = cols * rows;
+      const tileOrder = Array.from({ length: totalTiles }, (_, i) => i)
+        .sort(() => Math.random() - 0.5); // Randomize tile order for dynamic effect
+
+      setMosaicState(prev => ({
+        ...prev,
+        cols,
+        rows,
+        totalTiles,
+        tileOrder,
+        currentIndex: 0,
+      }));
+    };
+  }, [mainImage, mosaicState.tileSize]);
 
   // Apply next photo to a random tile (replace white with photo using soft-light)
   const applyNextPhoto = () => {
