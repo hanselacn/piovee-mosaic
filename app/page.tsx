@@ -626,6 +626,39 @@ export default function Home() {
     }
   }, [mosaicReady, restoreMosaicState])
 
+  // Effect: Recreate mosaic when fullscreen changes
+  useEffect(() => {
+    if (mosaicReady && mainImage) {
+      console.log("Fullscreen changed, recreating mosaic with new dimensions")
+      // Small delay to ensure the container has updated its dimensions
+      setTimeout(() => {
+        createMosaic()
+      }, 100)
+    }
+  }, [isFullscreen, mosaicReady, mainImage, createMosaic])
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).msFullscreenElement
+      )
+      setIsFullscreen(isCurrentlyFullscreen)
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('msfullscreenchange', handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('msfullscreenchange', handleFullscreenChange)
+    }
+  }, [])
+
   // Loading state
   if (loading) {
     return (
@@ -738,10 +771,10 @@ export default function Home() {
           )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className={`relative w-full bg-gray-800 rounded-lg overflow-hidden transition-all duration-300 ${
+            className={`relative bg-gray-800 rounded-lg overflow-hidden transition-all duration-300 ${
               isFullscreen 
-                ? 'fixed inset-0 z-50 rounded-none flex items-center justify-center bg-black' 
-                : ''
+                ? 'fixed inset-0 z-50 rounded-none bg-black w-screen h-screen' 
+                : 'w-full'
             }`}
             style={{ minHeight: isFullscreen ? '100vh' : '400px' }}
           >
