@@ -171,20 +171,12 @@ export default function CameraPage() {
             className="w-full h-full object-cover"
           />
           <div className="overlay absolute inset-0 pointer-events-none border-[20px] border-white/5 rounded-[32px]" />
-        </div>
-
-        <div className="filter-selector mt-4 flex gap-3">
+        </div>        <div className="filter-selector mt-4 flex gap-3">
           <button
             onClick={() => handleFilterChange("none")}
             className="font-[DM_Sans] bg-[#f1e8e2] rounded-lg px-3 py-2 text-sm text-[#5e4b44]"
           >
             Normal
-          </button>
-          <button
-            onClick={() => handleFilterChange("grayscale(100%)")}
-            className="font-[DM_Sans] bg-[#f1e8e2] rounded-lg px-3 py-2 text-sm text-[#5e4b44]"
-          >
-            Greyscale
           </button>
           <button
             onClick={() =>
@@ -196,7 +188,7 @@ export default function CameraPage() {
           >
             Analog
           </button>
-        </div>        <div className="flex items-center justify-center gap-6 mt-6 mb-4">
+        </div><div className="flex items-center justify-center gap-6 mt-6 mb-4">
           <button
             onClick={capturePhoto}
             className="shutter w-[72px] h-[72px] rounded-full border-[6px] border-[#e6d5ce] bg-white shadow-lg"

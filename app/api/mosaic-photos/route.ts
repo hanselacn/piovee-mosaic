@@ -5,18 +5,8 @@ import { uploadPhotoWithServiceAccount, getFileContentWithServiceAccount, isServ
 // GET: List all photos (optionally filter by ?used=false) with Google Drive data
 export async function GET(req: NextRequest) {
   try {
-    // Add CORS headers for better browser compatibility
-    const headers = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
-
     if (!isServiceAccountConfigured()) {
-      console.error("Service account not configured");
-      return NextResponse.json({ 
-        error: "Service account not configured. Please check Firebase configuration." 
-      }, { status: 503, headers });
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503 });
     }
 
     const used = req.nextUrl.searchParams.get('used');
@@ -24,16 +14,7 @@ export async function GET(req: NextRequest) {
     if (used !== null) {
       query = query.where('used', '==', used === 'true');
     }
-    
-    let snapshot;
-    try {
-      snapshot = await query.orderBy('timestamp', 'asc').get();
-    } catch (firestoreError) {
-      console.error('Firestore query failed:', firestoreError);
-      return NextResponse.json({ 
-        error: `Firestore query failed: ${firestoreError instanceof Error ? firestoreError.message : 'Unknown error'}` 
-      }, { status: 500, headers });
-    }
+    const snapshot = await query.orderBy('timestamp', 'asc').get();
     
     // Get photo metadata from Firestore
     const photoMetadata = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -58,12 +39,10 @@ export async function GET(req: NextRequest) {
       })
     );
     
-    return NextResponse.json({ photos }, { headers });
+    return NextResponse.json({ photos });
   } catch (error) {
     console.error('Error getting mosaic photos:', error);
-    return NextResponse.json({ 
-      error: `Failed to get photos: ${error instanceof Error ? error.message : 'Unknown error'}` 
-    }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to get photos' }, { status: 500 });
   }
 }
 

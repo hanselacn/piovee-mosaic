@@ -6,22 +6,6 @@ export async function middleware(request: NextRequest) {
   // Get the pathname
   const path = request.nextUrl.pathname
 
-  // Handle CORS for API routes
-  if (path.startsWith('/api')) {
-    // Handle preflight requests
-    if (request.method === 'OPTIONS') {
-      return new NextResponse(null, {
-        status: 200,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400',
-        },
-      });
-    }
-  }
-
   // Define public paths that don't require authentication
   const isPublicPath =
     path.startsWith("/auth") ||
@@ -33,10 +17,7 @@ export async function middleware(request: NextRequest) {
     path === "/api/main-image" ||
     path === "/api/camera-photos" ||
     path === "/api/upload-photo" ||
-    path === "/api/camera-auth" ||
-    path === "/api/mosaic-photos" ||
-    path === "/api/test-pusher" ||
-    path === "/api/health"
+    path === "/api/camera-auth"
 
   // Get the token
   const token = await getToken({
@@ -49,15 +30,6 @@ export async function middleware(request: NextRequest) {
     const url = new URL("/auth/signin", request.url)
     url.searchParams.set("callbackUrl", encodeURI(request.url))
     return NextResponse.redirect(url)
-  }
-
-  // Add CORS headers to API responses
-  if (path.startsWith('/api')) {
-    const response = NextResponse.next();
-    response.headers.set('Access-Control-Allow-Origin', '*');
-    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    return response;
   }
 
   return NextResponse.next()
