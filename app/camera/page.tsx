@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import styles from "./camera.module.css"
 
 export default function CameraPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -78,14 +77,13 @@ export default function CameraPage() {
       alert("Failed to upload photo. Please try again.");
     }
   }
-
   const handleFilterChange = (filterValue: string) => {
     setFilter(filterValue)
   }
-
+  
   return (
     <div className="relative min-h-screen w-full bg-[#fefaf7] text-[#5e4b44]">
-      <header className="mt-8 text-center">
+      <header className="pt-6 pb-2 text-center">
         <h1 className="font-[Cormorant_Garamond] text-4xl text-[#7a645f]">
           Piovee Camera
         </h1>
@@ -94,13 +92,12 @@ export default function CameraPage() {
         </div>
       </header>
 
-      <main className="flex flex-col items-center px-4">
-        <div className="camera-frame mt-8 w-full max-w-[390px] aspect-[3/4] bg-black rounded-[32px] shadow-lg overflow-hidden relative">
+      <main className="flex flex-col items-center px-4 pb-6">        <div className="camera-frame mt-4 w-full max-w-[390px] aspect-[3/4] bg-black rounded-[32px] shadow-lg overflow-hidden relative">
           <video
             ref={videoRef}
             autoPlay
             playsInline
-            style={{ filter }}
+            style={{ filter, transform: 'scaleX(-1)' }}
             className="w-full h-full object-cover"
           />
           <div className="overlay absolute inset-0 pointer-events-none border-[20px] border-white/5 rounded-[32px]" />
