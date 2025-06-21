@@ -152,18 +152,30 @@ export default function Home() {
       rows = mosaicState.rows
       tileSize = mosaicState.tileSize
       totalTiles = mosaicState.totalTiles
-      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)
-    } else {
-      // Calculate new grid configuration with larger container
+      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)    } else {
+      // Calculate new grid configuration preserving aspect ratio
       const maxWidth = Math.min(1200, window.innerWidth - 100) // Larger but responsive
-      const containerWidth = maxWidth
-      const containerHeight = Math.round(containerWidth / aspectRatio)
+      const maxHeight = Math.min(800, window.innerHeight - 300) // Account for UI elements
+      
+      // Calculate container dimensions that preserve aspect ratio
+      let containerWidth, containerHeight
+      
+      if (aspectRatio > maxWidth / maxHeight) {
+        // Image is wider - fit to width
+        containerWidth = maxWidth
+        containerHeight = Math.round(containerWidth / aspectRatio)
+      } else {
+        // Image is taller - fit to height
+        containerHeight = maxHeight
+        containerWidth = Math.round(containerHeight * aspectRatio)
+      }
+      
       tileSize = mosaicState.tileSize || 20
       
       cols = Math.ceil(containerWidth / tileSize)
       rows = Math.ceil(containerHeight / tileSize)
       totalTiles = cols * rows
-      console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles) for ${containerWidth}x${containerHeight}px`)
+      console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles) for ${containerWidth}x${containerHeight}px (aspect ratio: ${aspectRatio})`)
     }
     
     // Calculate container dimensions to match grid
@@ -709,14 +721,13 @@ export default function Home() {
           )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className="relative w-full bg-gray-800 rounded-lg overflow-hidden mx-auto"
-            style={{ minHeight: '600px', maxWidth: '1200px' }}
-          >
-            {mainImage && (
+            className="relative bg-gray-800 rounded-lg overflow-hidden mx-auto flex items-center justify-center"
+            style={{ minHeight: '400px', maxWidth: '1200px' }}
+          >{mainImage && (
               <img
                 src={mainImage}
                 alt="Main"
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-contain"
               />
             )}
             <div className="absolute inset-0">
