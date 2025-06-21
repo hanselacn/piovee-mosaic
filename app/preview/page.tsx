@@ -163,10 +163,9 @@ export default function PreviewPage() {
       // Calculate new grid configuration for fullscreen
       const screenWidth = window.innerWidth
       const screenHeight = window.innerHeight
-      
-      // Use larger dimensions - aim for 80% of screen size
-      const maxWidth = screenWidth * 0.9
-      const maxHeight = screenHeight * 0.8
+        // Use larger dimensions - aim for 90% of screen size
+      const maxWidth = screenWidth * 0.95
+      const maxHeight = screenHeight * 0.9
       
       // Calculate container dimensions to match main image aspect ratio
       let containerWidth, containerHeight

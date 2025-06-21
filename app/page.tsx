@@ -153,15 +153,15 @@ export default function Home() {
       tileSize = mosaicState.tileSize
       totalTiles = mosaicState.totalTiles
       console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)    } else {
-      // Calculate new grid configuration preserving aspect ratio
-      const maxWidth = Math.min(1200, window.innerWidth - 100) // Larger but responsive
-      const maxHeight = Math.min(800, window.innerHeight - 300) // Account for UI elements
+      // Calculate new grid configuration using maximum available space
+      const maxWidth = Math.min(1400, window.innerWidth - 120) // Use more of the available width
+      const maxHeight = Math.min(900, window.innerHeight - 300) // Account for UI elements
       
-      // Calculate container dimensions that preserve aspect ratio
+      // Calculate container dimensions that preserve aspect ratio and maximize space usage
       let containerWidth, containerHeight
       
       if (aspectRatio > maxWidth / maxHeight) {
-        // Image is wider - fit to width
+        // Image is wider - fit to width (use full width)
         containerWidth = maxWidth
         containerHeight = Math.round(containerWidth / aspectRatio)
       } else {
@@ -177,14 +177,13 @@ export default function Home() {
       totalTiles = cols * rows
       console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles) for ${containerWidth}x${containerHeight}px (aspect ratio: ${aspectRatio})`)
     }
+      // Calculate container dimensions to match grid (use the exact calculated dimensions)
+    const finalContainerWidth = cols * tileSize
+    const finalContainerHeight = rows * tileSize
     
-    // Calculate container dimensions to match grid
-    const containerWidth = cols * tileSize
-    const containerHeight = rows * tileSize
-    
-    // Set container dimensions to be larger
-    mosaicRef.current.style.width = `${containerWidth}px`
-    mosaicRef.current.style.height = `${containerHeight}px`
+    // Set container dimensions to use the full calculated size
+    mosaicRef.current.style.width = `${finalContainerWidth}px`
+    mosaicRef.current.style.height = `${finalContainerHeight}px`
     mosaicRef.current.style.maxWidth = 'none' // Remove any max-width constraints
     mosaicRef.current.style.maxHeight = 'none' // Remove any max-height constraints
 
@@ -657,11 +656,12 @@ export default function Home() {
       </div>
     )
   }
+  
   // Main mosaic display
   return (
-    <div className="min-h-screen bg-gray-900 p-4">
-      <Card className="max-w-7xl mx-auto">
-        <CardContent className="p-6">
+    <div className="min-h-screen bg-gray-900 p-2">
+      <Card className="max-w-[98vw] mx-auto">
+        <CardContent className="p-4">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold mb-2">Live Mosaic Display</h1>
@@ -721,9 +721,9 @@ export default function Home() {
           )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className="relative bg-gray-800 rounded-lg overflow-hidden mx-auto flex items-center justify-center"
-            style={{ minHeight: '400px', maxWidth: '1200px' }}
-          >{mainImage && (
+            className="relative bg-gray-800 rounded-lg overflow-hidden mx-auto flex items-center justify-center"            style={{ minHeight: '400px', width: '100%', maxWidth: '1400px' }}
+          >
+            {mainImage && (
               <img
                 src={mainImage}
                 alt="Main"
