@@ -146,8 +146,7 @@ export default function Home() {
     
     // Use grid configuration from Firestore if available, otherwise calculate
     let cols, rows, tileSize, totalTiles
-    
-    if (mosaicState.cols && mosaicState.rows && mosaicState.tileSize) {
+      if (mosaicState.cols && mosaicState.rows && mosaicState.tileSize) {
       // Use saved grid configuration
       cols = mosaicState.cols
       rows = mosaicState.rows
@@ -155,24 +154,27 @@ export default function Home() {
       totalTiles = mosaicState.totalTiles
       console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)
     } else {
-      // Calculate new grid configuration
-      const containerWidth = mosaicRef.current.clientWidth
+      // Calculate new grid configuration with larger container
+      const maxWidth = Math.min(1200, window.innerWidth - 100) // Larger but responsive
+      const containerWidth = maxWidth
       const containerHeight = Math.round(containerWidth / aspectRatio)
       tileSize = mosaicState.tileSize || 20
       
       cols = Math.ceil(containerWidth / tileSize)
       rows = Math.ceil(containerHeight / tileSize)
       totalTiles = cols * rows
-      console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles)`)
+      console.log(`Calculated new grid config: ${cols}x${rows} (${tileSize}px tiles) for ${containerWidth}x${containerHeight}px`)
     }
     
     // Calculate container dimensions to match grid
     const containerWidth = cols * tileSize
     const containerHeight = rows * tileSize
     
-    // Set container dimensions
+    // Set container dimensions to be larger
     mosaicRef.current.style.width = `${containerWidth}px`
     mosaicRef.current.style.height = `${containerHeight}px`
+    mosaicRef.current.style.maxWidth = 'none' // Remove any max-width constraints
+    mosaicRef.current.style.maxHeight = 'none' // Remove any max-height constraints
 
     // Generate randomized tile order if not already set
     let tileOrder = mosaicState.tileOrder
@@ -643,13 +645,12 @@ export default function Home() {
       </div>
     )
   }
-
   // Main mosaic display
   return (
-    <div className="min-h-screen bg-gray-900 p-8">
-      <Card className="max-w-6xl mx-auto">
-        <CardContent className="p-8">
-          <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen bg-gray-900 p-4">
+      <Card className="max-w-7xl mx-auto">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold mb-2">Live Mosaic Display</h1>
               <div className="flex gap-4 text-sm text-gray-500">
@@ -708,8 +709,8 @@ export default function Home() {
           )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className="relative w-full bg-gray-800 rounded-lg overflow-hidden"
-            style={{ minHeight: '400px' }}
+            className="relative w-full bg-gray-800 rounded-lg overflow-hidden mx-auto"
+            style={{ minHeight: '600px', maxWidth: '1200px' }}
           >
             {mainImage && (
               <img

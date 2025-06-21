@@ -159,22 +159,25 @@ export default function PreviewPage() {
       rows = mosaicState.rows
       tileSize = mosaicState.tileSize
       totalTiles = mosaicState.totalTiles
-      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)
-    } else {
+      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)    } else {
       // Calculate new grid configuration for fullscreen
       const screenWidth = window.innerWidth
       const screenHeight = window.innerHeight
       
+      // Use larger dimensions - aim for 80% of screen size
+      const maxWidth = screenWidth * 0.9
+      const maxHeight = screenHeight * 0.8
+      
       // Calculate container dimensions to match main image aspect ratio
       let containerWidth, containerHeight
       
-      if (aspectRatio > screenWidth / screenHeight) {
-        // Image is wider than screen ratio - fit to width
-        containerWidth = screenWidth
+      if (aspectRatio > maxWidth / maxHeight) {
+        // Image is wider than available ratio - fit to width
+        containerWidth = maxWidth
         containerHeight = Math.round(containerWidth / aspectRatio)
       } else {
-        // Image is taller than screen ratio - fit to height
-        containerHeight = screenHeight
+        // Image is taller than available ratio - fit to height
+        containerHeight = maxHeight
         containerWidth = Math.round(containerHeight * aspectRatio)
       }
       
@@ -182,7 +185,7 @@ export default function PreviewPage() {
       cols = Math.ceil(containerWidth / tileSize)
       rows = Math.ceil(containerHeight / tileSize)
       totalTiles = cols * rows
-      console.log(`Calculated fullscreen grid: ${cols}x${rows} (${tileSize}px tiles)`)
+      console.log(`Calculated fullscreen grid: ${cols}x${rows} (${tileSize}px tiles) for ${containerWidth}x${containerHeight}px`)
     }
     
     // Calculate container dimensions based on grid
