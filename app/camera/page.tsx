@@ -2,38 +2,71 @@
 
 import { useEffect, useRef, useState } from "react"
 
-export default function CameraPage() {  const videoRef = useRef<HTMLVideoElement>(null)
+export default function CameraPage() {
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [photoCount, setPhotoCount] = useState(0)
   const [photos, setPhotos] = useState<string[]>([])
   const maxPhotos = 10
   const [filter, setFilter] = useState("none")
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user") // user = front, environment = back
+  const [debugInfo, setDebugInfo] = useState<string>("")
   const startCamera = async (facing: "user" | "environment") => {
     if (!videoRef.current) return
 
     try {
+      setDebugInfo("Checking camera availability...")
+      
       // Stop existing stream if any
       const currentStream = videoRef.current.srcObject as MediaStream
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop())
       }
 
-      // Request new camera stream
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: facing }
-      })
+      // Check if camera is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera not supported in this browser or mode")
+      }
+
+      setDebugInfo(`Requesting ${facing} camera...`)
+
+      // Request new camera stream with fallback options
+      let stream: MediaStream
+      try {
+        // Try with specific facing mode first
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: facing }
+        })
+      } catch (facingError) {
+        console.warn(`Failed to use ${facing} camera, trying any camera:`, facingError)
+        setDebugInfo("Falling back to any available camera...")
+        // Fallback to any available camera
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: true
+        })
+      }
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        setDebugInfo("Camera started successfully!")
+        setTimeout(() => setDebugInfo(""), 3000)
       }
     } catch (err) {
       console.error("Error accessing camera:", err)
-      alert("Camera access is required to use Piovee.")
+      const errorMessage = err instanceof Error ? err.message : "Unknown camera error"
+      setDebugInfo(`Camera error: ${errorMessage}`)
+      alert(`Camera access failed: ${errorMessage}. Please allow camera permissions and refresh the page.`)
     }
   }
-
   useEffect(() => {
     startCamera(facingMode)
+    
+    // Check for incognito mode indicators
+    if (typeof window !== 'undefined') {
+      const isIncognito = !window.localStorage || !navigator.serviceWorker
+      if (isIncognito) {
+        setDebugInfo("Incognito mode detected - some features may be limited")
+      }
+    }
   }, [facingMode])
 
   const capturePhoto = async () => {
@@ -62,9 +95,8 @@ export default function CameraPage() {  const videoRef = useRef<HTMLVideoElement
     }
     
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
-    setPhotos((prev) => [...prev, dataUrl]);
-
-    try {
+    setPhotos((prev) => [...prev, dataUrl]);    try {
+      setDebugInfo(`Uploading photo ${photoCount + 1}...`)
       console.log(`Uploading photo ${photoCount + 1} to mosaic queue...`);
       
       // Upload photo to mosaic queue (will store in Google Drive + Firestore metadata)
@@ -79,21 +111,31 @@ export default function CameraPage() {  const videoRef = useRef<HTMLVideoElement
       });
       
       if (!mosaicRes.ok) {
-        const errorData = await mosaicRes.json();
-        throw new Error(errorData.error || "Failed to upload photo to mosaic queue");
+        const errorData = await mosaicRes.json().catch(() => ({ error: "Unknown server error" }));
+        console.error("Mosaic upload failed:", errorData);
+        throw new Error(errorData.error || `Failed to upload photo to mosaic queue (${mosaicRes.status})`);
       }
 
+      setDebugInfo("Triggering live update...")
       console.log("Photo uploaded to mosaic queue, triggering Pusher event...");
       
       // Trigger Pusher event to notify main page
-      await fetch("/api/test-pusher", { method: "POST" });
+      try {
+        await fetch("/api/test-pusher", { method: "POST" });
+      } catch (pusherError) {
+        console.warn("Pusher notification failed, but photo was uploaded:", pusherError);
+      }
       
       setPhotoCount((prev) => prev + 1);
+      setDebugInfo("Photo uploaded successfully!")
+      setTimeout(() => setDebugInfo(""), 3000)
       console.log("Photo uploaded to mosaic queue and Pusher triggered successfully");
     } catch (error) {
       console.error("Error uploading photo:", error);
-      alert("Failed to upload photo. Please try again.");
-    }  }
+      const errorMessage = error instanceof Error ? error.message : "Unknown upload error";
+      setDebugInfo(`Upload failed: ${errorMessage}`)
+      alert(`Failed to upload photo: ${errorMessage}. Please check your connection and try again.`);
+    }}
 
   const handleFilterChange = (filterValue: string) => {
     setFilter(filterValue)
@@ -108,10 +150,14 @@ export default function CameraPage() {  const videoRef = useRef<HTMLVideoElement
       <header className="pt-6 pb-2 text-center">
         <h1 className="font-[Cormorant_Garamond] text-4xl text-[#7a645f]">
           Piovee Camera
-        </h1>
-        <div className="font-[DM_Sans] text-sm text-[#a0918a]">
+        </h1>        <div className="font-[DM_Sans] text-sm text-[#a0918a]">
           Your wedding POV. One click at a time.
         </div>
+        {debugInfo && (
+          <div className="mt-2 text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-md">
+            {debugInfo}
+          </div>
+        )}
       </header>
 
       <main className="flex flex-col items-center px-4 pb-6">        <div className="camera-frame mt-4 w-full max-w-[390px] aspect-[3/4] bg-black rounded-[32px] shadow-lg overflow-hidden relative">          <video

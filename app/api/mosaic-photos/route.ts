@@ -49,14 +49,32 @@ export async function GET(req: NextRequest) {
 // POST: Add a new photo to Google Drive and store metadata in Firestore
 export async function POST(req: NextRequest) {
   try {
+    // Add CORS headers for better browser compatibility
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
     if (!isServiceAccountConfigured()) {
-      return NextResponse.json({ error: "Service account not configured" }, { status: 503 });
+      console.error("Service account not configured");
+      return NextResponse.json({ error: "Service account not configured" }, { status: 503, headers });
     }
 
-    const { photoData, timestamp, fileName, tileIndex } = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400, headers });
+    }
+
+    const { photoData, timestamp, fileName, tileIndex } = body;
     
     if (!photoData) {
-      return NextResponse.json({ error: "No photo data provided" }, { status: 400 });
+      return NextResponse.json({ error: "No photo data provided" }, { status: 400, headers });
+    }
+
+    // Validate photo data format
+    if (!photoData.startsWith('data:image/')) {
+      return NextResponse.json({ error: "Invalid photo data format" }, { status: 400, headers });
     }
 
     // Generate unique filename if not provided
@@ -64,30 +82,47 @@ export async function POST(req: NextRequest) {
     
     console.log(`📤 Uploading mosaic photo to Google Drive: ${finalFileName}`);
     
-    // Upload photo to Google Drive
-    const fileId = await uploadPhotoWithServiceAccount(
-      photoData, 
-      finalFileName, 
-      process.env.GOOGLE_DRIVE_FOLDER_ID!
-    );
+    // Upload photo to Google Drive with error handling
+    let fileId: string;
+    try {
+      fileId = await uploadPhotoWithServiceAccount(
+        photoData, 
+        finalFileName, 
+        process.env.GOOGLE_DRIVE_FOLDER_ID!
+      );
+    } catch (uploadError) {
+      console.error('Google Drive upload failed:', uploadError);
+      return NextResponse.json({ 
+        error: `Failed to upload to Google Drive: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}` 
+      }, { status: 500, headers });
+    }
     
     console.log(`✅ Photo uploaded to Google Drive: ${fileId}`);
-    
-    // Store metadata in Firestore (without the large photo data)
-    const docRef = await db.collection('mosaic-photos').add({
-      fileId, // Google Drive file ID
-      fileName: finalFileName,
-      timestamp: timestamp || Date.now(),
-      tileIndex: tileIndex || null,
-      used: false,
-    });
+      // Store metadata in Firestore (without the large photo data)
+    let docRef;
+    try {
+      docRef = await db.collection('mosaic-photos').add({
+        fileId, // Google Drive file ID
+        fileName: finalFileName,
+        timestamp: timestamp || Date.now(),
+        tileIndex: tileIndex || null,
+        used: false,
+      });
+    } catch (firestoreError) {
+      console.error('Firestore save failed:', firestoreError);
+      return NextResponse.json({ 
+        error: `Failed to save to Firestore: ${firestoreError instanceof Error ? firestoreError.message : 'Unknown error'}` 
+      }, { status: 500, headers });
+    }
     
     console.log(`✅ Photo metadata saved to Firestore: ${docRef.id}`);
     
-    return NextResponse.json({ id: docRef.id, fileId });
+    return NextResponse.json({ id: docRef.id, fileId }, { headers });
   } catch (error) {
     console.error('Error adding mosaic photo:', error);
-    return NextResponse.json({ error: 'Failed to add photo' }, { status: 500 });
+    return NextResponse.json({ 
+      error: `Failed to add photo: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    }, { status: 500 });
   }
 }
 
@@ -132,4 +167,16 @@ export async function DELETE(req: NextRequest) {
     console.error('Error resetting mosaic photos:', error);
     return NextResponse.json({ error: 'Failed to reset mosaic photos' }, { status: 500 });
   }
+}
+
+// OPTIONS: Handle CORS preflight requests
+export async function OPTIONS() {
+  return NextResponse.json({}, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, GET, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 }
