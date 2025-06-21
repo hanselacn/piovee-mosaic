@@ -31,6 +31,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>("")
   const [status, setStatus] = useState<string>("")
+  const [debugMode, setDebugMode] = useState(false)
   // Mosaic state
   const [mosaicState, setMosaicState] = useState<MosaicState>({
     cols: 0,
@@ -46,18 +47,33 @@ export default function Home() {
   // Refs for DOM elements
   const mosaicRef = useRef<HTMLDivElement>(null)
   const photoLayerRef = useRef<HTMLDivElement>(null)
-  const whiteLayerRef = useRef<HTMLDivElement>(null)
-  // Fetch all unused photos from Firestore
+  const whiteLayerRef = useRef<HTMLDivElement>(null)  // Fetch all unused photos from Firestore
   const fetchPhotos = useCallback(async () => {
     try {
       console.log('Fetching unused photos from Firestore...');
       const res = await fetch('/api/mosaic-photos?used=false');
+      
+      // Check if response is OK
+      if (!res.ok) {
+        console.error(`API request failed: ${res.status} ${res.statusText}`);
+        throw new Error(`Failed to fetch photos: ${res.status} ${res.statusText}`);
+      }
+      
+      // Check if response is JSON
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const textResponse = await res.text();
+        console.error('Non-JSON response received:', textResponse.substring(0, 200));
+        throw new Error('Server returned non-JSON response. Check server logs.');
+      }
+      
       const data = await res.json();
       console.log(`Fetched ${data.photos?.length || 0} unused photos:`, data.photos?.map((p: any) => p.id));
       setPhotos(data.photos || []);
     } catch (err) {
       console.error('Error fetching photos:', err);
-      setError('Failed to fetch photos from Firestore');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to fetch photos from Firestore: ${errorMessage}`);
     }
   }, []);
 
@@ -65,11 +81,25 @@ export default function Home() {
   useEffect(() => {
     fetchPhotos();
   }, [fetchPhotos]);
-
   // On Pusher event, fetch photos again
   const handleNewPhoto = useCallback(() => {
     fetchPhotos();
-  }, [fetchPhotos]);  // Process photo queue efficiently: take one photo, collage it, mark as used, repeat
+  }, [fetchPhotos]);
+
+  // Check API health for debugging
+  const checkAPIHealth = useCallback(async () => {
+    try {
+      const res = await fetch('/api/health');
+      const health = await res.json();
+      console.log('API Health Check:', health);
+      setStatus(`API Health: ${health.status === 'ok' ? '✅ OK' : '❌ Error'}`);
+      setTimeout(() => setStatus(''), 5000);
+    } catch (err) {
+      console.error('Health check failed:', err);
+      setStatus('❌ Health check failed');
+      setTimeout(() => setStatus(''), 5000);
+    }
+  }, []);// Process photo queue efficiently: take one photo, collage it, mark as used, repeat
   useEffect(() => {
     if (!mosaicReady) return;
     if (photos.length === 0) return;
@@ -238,12 +268,25 @@ export default function Home() {
 
     // Set mosaic ready state
     setMosaicReady(true)
-  }, [mainImage, mosaicState.tileSize])
-  // Load main image and grid configuration
+  }, [mainImage, mosaicState.tileSize])  // Load main image and grid configuration
   const loadMainImage = async () => {
     try {
       setLoading(true)
       const response = await fetch("/api/main-image")
+      
+      if (!response.ok) {
+        console.error(`Main image API request failed: ${response.status} ${response.statusText}`);
+        throw new Error(`Failed to load main image: ${response.status} ${response.statusText}`);
+      }
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const textResponse = await response.text();
+        console.error('Non-JSON response received from main-image API:', textResponse.substring(0, 200));
+        throw new Error('Server returned non-JSON response for main image. Check server logs.');
+      }
+      
       const data = await response.json()
 
       if (data.mainImage?.dataUrl) {
@@ -260,7 +303,8 @@ export default function Home() {
         }
       }
     } catch (err) {
-      setError("Failed to load main image")
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Failed to load main image: ${errorMessage}`)
       console.error(err)
     } finally {
       setLoading(false)
@@ -692,12 +736,28 @@ export default function Home() {
                 className="text-orange-600 hover:text-orange-700"
               >
                 Reset Photos
-              </Button>
-              <Button 
+              </Button>              <Button 
                 variant="destructive" 
                 onClick={resetMosaic}
               >
                 Reset All
+              </Button>
+              {debugMode && (
+                <Button 
+                  variant="outline" 
+                  onClick={checkAPIHealth}
+                  className="text-blue-600 hover:text-blue-700"
+                >
+                  Health Check
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setDebugMode(!debugMode)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                {debugMode ? '🐞' : '🔧'}
               </Button>
             </div>
           </div>
@@ -710,15 +770,27 @@ export default function Home() {
                 width: `${(mosaicState.currentIndex / mosaicState.totalTiles) * 100}%`
               }}
             />
-          </div>
-
-          {status && (
+          </div>          {status && (
             <div className="mb-4">
               <Alert>
                 <AlertDescription>{status}</AlertDescription>
               </Alert>
             </div>
-          )}          {/* Mosaic display */}
+          )}
+
+          {debugMode && (
+            <div className="mb-4 p-4 bg-gray-800 rounded-lg text-xs">
+              <div className="text-white mb-2 font-bold">Debug Information:</div>
+              <div className="text-gray-300 space-y-1">
+                <div>Mosaic Ready: {mosaicReady ? '✅' : '❌'}</div>
+                <div>Photos in Queue: {photos.length}</div>
+                <div>Is Processing: {isProcessing ? '⏳' : '✅'}</div>
+                <div>Grid: {mosaicState.cols}×{mosaicState.rows} ({mosaicState.totalTiles} tiles)</div>
+                <div>Current Index: {mosaicState.currentIndex}</div>
+                <div>Last Error: {error || 'None'}</div>
+              </div>
+            </div>
+          )}{/* Mosaic display */}
           <div
             ref={mosaicRef}
             className="relative bg-gray-800 rounded-lg overflow-hidden mx-auto flex items-center justify-center"            style={{ minHeight: '400px', width: '100%', maxWidth: '1400px' }}
