@@ -137,8 +137,7 @@ export default function PreviewPage() {
     });
 
   }, [photos, mosaicReady, mosaicState.currentIndex, mosaicState.totalTiles, mosaicState.tileOrder, isProcessing])
-
-  // Create mosaic grid for fullscreen
+  // Create mosaic grid optimized for fullscreen
   const createMosaic = useCallback(async () => {
     if (!mainImage || !mosaicRef.current || !photoLayerRef.current || !whiteLayerRef.current) return
 
@@ -155,44 +154,46 @@ export default function PreviewPage() {
     let cols, rows, tileSize, totalTiles
     
     if (mosaicState.cols && mosaicState.rows && mosaicState.tileSize) {
-      // Use saved grid configuration but scale for fullscreen
-      const screenWidth = window.innerWidth
-      const screenHeight = window.innerHeight
-      const screenAspectRatio = screenWidth / screenHeight
-      
-      if (aspectRatio > screenAspectRatio) {
-        // Image is wider, fit to width
-        const containerWidth = screenWidth
-        const containerHeight = Math.round(containerWidth / aspectRatio)
-        tileSize = Math.max(8, Math.min(50, containerWidth / mosaicState.cols))
-        cols = Math.ceil(containerWidth / tileSize)
-        rows = Math.ceil(containerHeight / tileSize)
-      } else {
-        // Image is taller, fit to height
-        const containerHeight = screenHeight
-        const containerWidth = Math.round(containerHeight * aspectRatio)
-        tileSize = Math.max(8, Math.min(50, containerHeight / mosaicState.rows))
-        rows = Math.ceil(containerHeight / tileSize)
-        cols = Math.ceil(containerWidth / tileSize)
-      }
-      
-      totalTiles = cols * rows
-      console.log(`Scaled grid for fullscreen: ${cols}x${rows} (${tileSize}px tiles)`)
+      // Use saved grid configuration
+      cols = mosaicState.cols
+      rows = mosaicState.rows
+      tileSize = mosaicState.tileSize
+      totalTiles = mosaicState.totalTiles
+      console.log(`Using saved grid config: ${cols}x${rows} (${tileSize}px tiles)`)
     } else {
       // Calculate new grid configuration for fullscreen
-      const containerWidth = window.innerWidth
-      const containerHeight = window.innerHeight
-      tileSize = 30 // Good size for fullscreen
+      const screenWidth = window.innerWidth
+      const screenHeight = window.innerHeight
       
+      // Calculate container dimensions to match main image aspect ratio
+      let containerWidth, containerHeight
+      
+      if (aspectRatio > screenWidth / screenHeight) {
+        // Image is wider than screen ratio - fit to width
+        containerWidth = screenWidth
+        containerHeight = Math.round(containerWidth / aspectRatio)
+      } else {
+        // Image is taller than screen ratio - fit to height
+        containerHeight = screenHeight
+        containerWidth = Math.round(containerHeight * aspectRatio)
+      }
+      
+      tileSize = mosaicState.tileSize || 20
       cols = Math.ceil(containerWidth / tileSize)
       rows = Math.ceil(containerHeight / tileSize)
       totalTiles = cols * rows
-      console.log(`New fullscreen grid: ${cols}x${rows} (${tileSize}px tiles)`)
+      console.log(`Calculated fullscreen grid: ${cols}x${rows} (${tileSize}px tiles)`)
     }
     
-    // Set container to fill screen
-    mosaicRef.current.style.width = `${window.innerWidth}px`
-    mosaicRef.current.style.height = `${window.innerHeight}px`
+    // Calculate container dimensions based on grid
+    const containerWidth = cols * tileSize
+    const containerHeight = rows * tileSize
+    
+    // Center the container on screen
+    mosaicRef.current.style.width = `${containerWidth}px`
+    mosaicRef.current.style.height = `${containerHeight}px`
+    mosaicRef.current.style.left = `${(window.innerWidth - containerWidth) / 2}px`
+    mosaicRef.current.style.top = `${(window.innerHeight - containerHeight) / 2}px`
 
     // Generate randomized tile order if not already set
     let tileOrder = mosaicState.tileOrder
@@ -245,7 +246,7 @@ export default function PreviewPage() {
 
     // Set mosaic ready state
     setMosaicReady(true)
-  }, [mainImage, mosaicState.cols, mosaicState.rows, mosaicState.tileSize, mosaicState.tileOrder])
+  }, [mainImage, mosaicState.tileSize, mosaicState.cols, mosaicState.rows, mosaicState.totalTiles, mosaicState.tileOrder])
 
   // Load main image and grid configuration
   const loadMainImage = async () => {
@@ -484,18 +485,17 @@ export default function PreviewPage() {
             <AlertDescription className="text-white">{status}</AlertDescription>
           </Alert>
         </div>
-      )}
-
-      {/* Fullscreen mosaic display */}
+      )}      {/* Fullscreen mosaic display */}
       <div
         ref={mosaicRef}
-        className="fixed inset-0 bg-black"
+        className="absolute bg-black"
+        style={{ position: 'absolute' }}
       >
         {mainImage && (
           <img
             src={mainImage}
             alt="Main"
-            className="absolute inset-0 w-full h-full object-contain"
+            className="absolute inset-0 w-full h-full object-cover"
           />
         )}
         <div className="absolute inset-0">

@@ -663,13 +663,15 @@ export default function Home() {
               </Button>
               <Button variant="outline" asChild>
                 <Link href="/camera">Add Photos</Link>
-              </Button>
-              <Button 
+              </Button>              <Button 
                 variant="secondary" 
                 onClick={saveMosaicToGoogleDrive}
                 disabled={!mosaicReady}
               >
                 Save to Drive
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/preview">Fullscreen Preview</Link>
               </Button>
               <Button 
                 variant="outline" 
