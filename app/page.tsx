@@ -487,31 +487,6 @@ export default function Home() {
     }
   }
 
-  // Toggle fullscreen mode for mosaic
-  const toggleFullscreen = () => {
-    if (!mosaicRef.current) return
-
-    if (!isFullscreen) {
-      // Enter fullscreen
-      if (mosaicRef.current.requestFullscreen) {
-        mosaicRef.current.requestFullscreen()
-      } else if ((mosaicRef.current as any).webkitRequestFullscreen) {
-        (mosaicRef.current as any).webkitRequestFullscreen()
-      } else if ((mosaicRef.current as any).msRequestFullscreen) {
-        (mosaicRef.current as any).msRequestFullscreen()
-      }
-    } else {
-      // Exit fullscreen
-      if (document.exitFullscreen) {
-        document.exitFullscreen()
-      } else if ((document as any).webkitExitFullscreen) {
-        (document as any).webkitExitFullscreen()
-      } else if ((document as any).msExitFullscreen) {
-        (document as any).msExitFullscreen()
-      }
-    }
-  }
-
   // Reset the mosaic photos only (keep main image and grid configuration)
   const resetMosaicPhotos = async () => {
     if (!confirm('Are you sure you want to reset all mosaic photos? This will clear the mosaic but keep photos in Google Drive.')) {
@@ -626,39 +601,6 @@ export default function Home() {
     }
   }, [mosaicReady, restoreMosaicState])
 
-  // Effect: Recreate mosaic when fullscreen changes
-  useEffect(() => {
-    if (mosaicReady && mainImage) {
-      console.log("Fullscreen changed, recreating mosaic with new dimensions")
-      // Small delay to ensure the container has updated its dimensions
-      setTimeout(() => {
-        createMosaic()
-      }, 100)
-    }
-  }, [isFullscreen, mosaicReady, mainImage, createMosaic])
-
-  // Listen for fullscreen changes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = !!(
-        document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (document as any).msFullscreenElement
-      )
-      setIsFullscreen(isCurrentlyFullscreen)
-    }
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
-    document.addEventListener('msfullscreenchange', handleFullscreenChange)
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange)
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
-      document.removeEventListener('msfullscreenchange', handleFullscreenChange)
-    }
-  }, [])
-
   // Loading state
   if (loading) {
     return (
@@ -721,20 +663,13 @@ export default function Home() {
               </Button>
               <Button variant="outline" asChild>
                 <Link href="/camera">Add Photos</Link>
-              </Button>              <Button 
+              </Button>
+              <Button 
                 variant="secondary" 
                 onClick={saveMosaicToGoogleDrive}
                 disabled={!mosaicReady}
               >
                 Save to Drive
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={toggleFullscreen}
-                disabled={!mosaicReady}
-                className="text-blue-600 hover:text-blue-700"
-              >
-                {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
               </Button>
               <Button 
                 variant="outline" 
@@ -771,12 +706,8 @@ export default function Home() {
           )}          {/* Mosaic display */}
           <div
             ref={mosaicRef}
-            className={`relative bg-gray-800 rounded-lg overflow-hidden transition-all duration-300 ${
-              isFullscreen 
-                ? 'fixed inset-0 z-50 rounded-none bg-black w-screen h-screen' 
-                : 'w-full'
-            }`}
-            style={{ minHeight: isFullscreen ? '100vh' : '400px' }}
+            className="relative w-full bg-gray-800 rounded-lg overflow-hidden"
+            style={{ minHeight: '400px' }}
           >
             {mainImage && (
               <img
@@ -784,7 +715,8 @@ export default function Home() {
                 alt="Main"
                 className="absolute inset-0 w-full h-full object-cover"
               />
-            )}            <div className="absolute inset-0">
+            )}
+            <div className="absolute inset-0">
               <div
                 ref={photoLayerRef}
                 className="absolute inset-0 mix-blend-soft-light"
@@ -794,13 +726,6 @@ export default function Home() {
                 className="absolute inset-0"
               />
             </div>
-            
-            {/* Fullscreen hint */}
-            {isFullscreen && (
-              <div className="absolute top-4 right-4 bg-black bg-opacity-50 text-white px-3 py-2 rounded-md text-sm">
-                Press ESC or click to exit fullscreen
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
