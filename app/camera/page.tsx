@@ -2,28 +2,39 @@
 
 import { useEffect, useRef, useState } from "react"
 
-export default function CameraPage() {
-  const videoRef = useRef<HTMLVideoElement>(null)
+export default function CameraPage() {  const videoRef = useRef<HTMLVideoElement>(null)
   const [photoCount, setPhotoCount] = useState(0)
   const [photos, setPhotos] = useState<string[]>([])
   const maxPhotos = 10
   const [filter, setFilter] = useState("none")
-
-  useEffect(() => {
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user") // user = front, environment = back
+  const startCamera = async (facing: "user" | "environment") => {
     if (!videoRef.current) return
 
-    navigator.mediaDevices
-      .getUserMedia({ video: true })
-      .then((stream) => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
+    try {
+      // Stop existing stream if any
+      const currentStream = videoRef.current.srcObject as MediaStream
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop())
+      }
+
+      // Request new camera stream
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: facing }
       })
-      .catch((err) => {
-        alert("Camera access is required to use Piovee.")
-        console.error(err)
-      })
-  }, [])
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+    } catch (err) {
+      console.error("Error accessing camera:", err)
+      alert("Camera access is required to use Piovee.")
+    }
+  }
+
+  useEffect(() => {
+    startCamera(facingMode)
+  }, [facingMode])
 
   const capturePhoto = async () => {
     if (photoCount >= maxPhotos) {
@@ -41,7 +52,14 @@ export default function CameraPage() {
     if (!ctx) return
 
     ctx.filter = filter
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
+    
+    // If using front camera, flip the image back to normal for saving
+    if (facingMode === "user") {
+      ctx.scale(-1, 1)
+      ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height)
+    } else {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
+    }
     
     const dataUrl = canvas.toDataURL("image/jpeg", 0.8)
     setPhotos((prev) => [...prev, dataUrl]);
@@ -75,10 +93,14 @@ export default function CameraPage() {
     } catch (error) {
       console.error("Error uploading photo:", error);
       alert("Failed to upload photo. Please try again.");
-    }
-  }
+    }  }
+
   const handleFilterChange = (filterValue: string) => {
     setFilter(filterValue)
+  }
+
+  const flipCamera = () => {
+    setFacingMode(prev => prev === "user" ? "environment" : "user")
   }
   
   return (
@@ -92,12 +114,14 @@ export default function CameraPage() {
         </div>
       </header>
 
-      <main className="flex flex-col items-center px-4 pb-6">        <div className="camera-frame mt-4 w-full max-w-[390px] aspect-[3/4] bg-black rounded-[32px] shadow-lg overflow-hidden relative">
-          <video
+      <main className="flex flex-col items-center px-4 pb-6">        <div className="camera-frame mt-4 w-full max-w-[390px] aspect-[3/4] bg-black rounded-[32px] shadow-lg overflow-hidden relative">          <video
             ref={videoRef}
             autoPlay
             playsInline
-            style={{ filter, transform: 'scaleX(-1)' }}
+            style={{ 
+              filter, 
+              transform: facingMode === "user" ? 'scaleX(-1)' : 'none' 
+            }}
             className="w-full h-full object-cover"
           />
           <div className="overlay absolute inset-0 pointer-events-none border-[20px] border-white/5 rounded-[32px]" />
@@ -126,13 +150,40 @@ export default function CameraPage() {
           >
             Analog
           </button>
+        </div>        <div className="flex items-center justify-center gap-6 mt-6 mb-4">
+          <button
+            onClick={capturePhoto}
+            className="shutter w-[72px] h-[72px] rounded-full border-[6px] border-[#e6d5ce] bg-white shadow-lg"
+            aria-label="Take photo"
+          />
+            <button
+            onClick={flipCamera}
+            className="w-[48px] h-[48px] rounded-full bg-[#f1e8e2] border-2 border-[#e6d5ce] shadow-md flex items-center justify-center"
+            aria-label="Flip camera"
+          >            <svg 
+              width="20" 
+              height="20" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              className="text-[#5e4b44]"
+            >
+              <path 
+                d="M23 4v6h-6M1 20v-6h6" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              />
+              <path 
+                d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
-
-        <button
-          onClick={capturePhoto}
-          className="shutter mt-6 mb-4 w-[72px] h-[72px] rounded-full border-[6px] border-[#e6d5ce] bg-white shadow-lg"
-          aria-label="Take photo"
-        />
 
         <div className="photos flex flex-wrap justify-center gap-3 p-4">
           {photos.map((photo, index) => (
